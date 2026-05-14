@@ -30,7 +30,17 @@
               pre-commit
               rustPackages.clippy
               pkg-config
+              fontconfig
+              libxkbcommon
+              wayland
             ];
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+              with pkgs;
+              [
+                wayland
+                vulkan-loader
+              ]
+            );
             RUST_SRC_PATH = rustPlatform.rustLibSrc;
           };
       }

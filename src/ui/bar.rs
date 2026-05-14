@@ -20,7 +20,6 @@ impl Render for Bar {
         _: &mut gpui::Window,
         _: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        println!("rendering shit");
         div()
             .size_full()
             .text_color(rgb(0xffffff))
@@ -42,7 +41,7 @@ pub fn open_window<T: Render>(app:&mut gpui::App, root: Entity<T>) -> WindowHand
 
                 kind: gpui::WindowKind::LayerShell(gpui::layer_shell::LayerShellOptions {
                     anchor: Anchor::LEFT | Anchor::RIGHT | Anchor::TOP,
-                    layer: gpui::layer_shell::Layer::Overlay,
+                    layer: gpui::layer_shell::Layer::Top,
                     exclusive_zone: Some(px(BAR_HEIGHT)),
                     keyboard_interactivity: gpui::layer_shell::KeyboardInteractivity::None,
                     ..Default::default()
