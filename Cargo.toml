@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+chrono = "0.4.44"
+directories = "6.0.0"
 enum_dispatch = "0.3.13"
 gpui = { git = "https://github.com/zed-industries/zed", branch = "main", features = ["wayland"] }
 gpui_platform = { git = "https://github.com/zed-industries/zed", branch = "main", features = ["wayland"] }

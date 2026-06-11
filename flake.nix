@@ -28,7 +28,6 @@
               rustc
               rustfmt
               pre-commit
-              rustPackages.clippy
               pkg-config
               fontconfig
               libxkbcommon

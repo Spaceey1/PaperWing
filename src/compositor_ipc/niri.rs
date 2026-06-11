@@ -5,14 +5,12 @@ use std::{
     error::Error,
     fmt,
     io::{BufRead, BufReader, Write},
-    ops::Deref,
-    os::unix::net::{self, UnixStream},
-    sync::{Arc, Mutex, OnceLock, mpsc},
+    sync::{Arc, OnceLock},
 };
 
-use smol::channel::Sender;
-
-use crate::UiEvent;
+use crate::ui::event::*;
+use smol::{channel::Sender, future::FutureExt, lock::Mutex};
+use std::os::unix::net::UnixStream;
 
 #[derive(Debug)]
 pub enum HandlingError {
@@ -35,36 +33,42 @@ impl fmt::Display for HandlingError {
 
 impl std::error::Error for HandlingError {}
 
-#[derive(Debug)]
-pub enum GetWindowError {
-    NotFound,
-    Unknown,
-}
-
-impl fmt::Display for GetWindowError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            GetWindowError::Unknown => write!(f, "{}", "Something went wrong"),
-            GetWindowError::NotFound => write!(f, "{}", "Window not found"),
-        }
-    }
-}
-
-impl std::error::Error for GetWindowError {}
-
 #[enum_dispatch::enum_dispatch]
 trait EventHandler {
     fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError>;
 }
 
-impl std::fmt::Display for Event {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            serde_json::to_string(&self).unwrap_or("Invalid event".to_string())
-        )
-    }
+#[derive(Serialize, Deserialize)]
+pub struct Output {
+    name: String,
+    make: String,
+    model: String,
+    serial: String,
+    physical_size: Vec<i64>,
+    modes: Vec<Mode>,
+    current_mode: i64,
+    is_custom_mode: bool,
+    vrr_supported: bool,
+    vrr_enabled: bool,
+    logical: Logical,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Logical {
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
+    scale: i64,
+    transform: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Mode {
+    width: i64,
+    height: i64,
+    refresh_rate: i64,
+    is_preferred: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -72,51 +76,47 @@ pub struct WorkspaceActivated {
     pub id: i64,
     pub focused: bool,
 }
-
 impl EventHandler for WorkspaceActivated {
     fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
         Ok(()) // TODO
     }
 }
-#[derive(Serialize, Deserialize)]
-pub struct WorkspaceActiveWindowChanged {
-    pub workspace_id: i64,
-    pub active_window_id: i64,
-}
 
-impl EventHandler for WorkspaceActiveWindowChanged {
-    fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
-        Ok(()) // TODO
-    }
-}
 #[derive(Serialize, Deserialize)]
 pub struct WindowFocusChanged {
-    pub id: u64,
-}
-
+    pub id: Option<u64>, }
 impl EventHandler for WindowFocusChanged {
     fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
-        match get_window(&self.id) {
-            Ok(window) => {
-                event_channel
-                    .send_blocking(UiEvent::FocusedWindowChanged(window))
-                    .unwrap();
+        fn send_empty(event_channel: Sender<UiEvent>) {
+            event_channel
+                .send_blocking(UiEvent::FocusedWindowChanged(Arc::new(Window {
+                    title: "".to_string(),
+                    ..Default::default()
+                })))
+                .ok();
+        }
+        match self.id {
+            Some(id) => {
+                match get_window(&id) {
+                    Ok(window) => {
+                        event_channel
+                            .send_blocking(UiEvent::FocusedWindowChanged(window))
+                            .unwrap();
+                    }
+                    Err(GetResourceError::NotFound) => {
+                        send_empty(event_channel);
+                        println!("Window with id {} not found", id);
+                        return Ok(());
+                    }
+                    Err(_) => return Err(HandlingError::Unknown),
+                };
             }
-            Err(GetWindowError::NotFound) => {
-                // event_channel.send(UiEvent::FocusedWindowChanged("".to_string()));
-                println!("Window with id {} not found", self.id);
-                return Ok(());
+            None => {
+                send_empty(event_channel);
             }
-            Err(_) => return Err(HandlingError::Unknown),
-        };
+        }
         Ok(()) // TODO
     }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct FocusTimestamp {
-    pub secs: i64,
-    pub nanos: i64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -125,24 +125,24 @@ pub struct WindowOpenedOrChanged {
 }
 impl EventHandler for WindowOpenedOrChanged {
     fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
-        let window = track_window(self.window);
-        event_channel.send_blocking(UiEvent::FocusedWindowChanged(window)).ok();
+        let window = track_window(self.window).map_err(|_| HandlingError::Unknown)?;
+        if window.is_focused {
+            event_channel
+                .send_blocking(UiEvent::FocusedWindowChanged(window))
+                .ok();
+        }
         Ok(())
     }
 }
-static WINDOWS: OnceLock<Mutex<HashMap<u64, Arc<Window>>>> = OnceLock::new();
-fn get_windows() -> &'static Mutex<HashMap<u64, Arc<Window>>> {
-    WINDOWS.get_or_init(|| Mutex::new(HashMap::new()))
-}
+
 #[derive(Serialize, Deserialize)]
 pub struct WindowsChanged {
     pub windows: Vec<Window>,
 }
-
 impl EventHandler for WindowsChanged {
     fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
         for window in self.windows.into_iter() {
-            let window = track_window(window);
+            let window = track_window(window).map_err(|_| HandlingError::Unknown)?;
             if window.is_focused {
                 event_channel
                     .send_blocking(UiEvent::FocusedWindowChanged(window.clone()))
@@ -153,36 +153,41 @@ impl EventHandler for WindowsChanged {
     }
 }
 
-fn track_window(window: Window) -> Arc<Window> {
-    let window = Arc::new(window);
-    get_windows()
-        .lock()
-        .unwrap()
-        .insert(window.id, window.clone());
-    window
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Window {
+#[derive(Serialize, Deserialize)]
+pub struct WindowClosed {
     pub id: u64,
-    pub title: String,
-    pub app_id: String,
-    pub pid: u64,
-    pub workspace_id: u64,
-    pub is_focused: bool,
-    pub is_floating: bool,
-    pub is_urgent: bool,
-    pub layout: Layout,
-    pub focus_timestamp: FocusTimestamp,
+}
+impl EventHandler for WindowClosed {
+    fn handle(self, _event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
+        match remove_window(&self.id) {
+            Ok(removed_window) => match removed_window {
+                Some(_) => Ok(()),
+                None => Err(HandlingError::BadData),
+            },
+            Err(_) => Err(HandlingError::Unknown),
+        }
+    }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Layout {
-    pub pos_in_scrolling_layout: Vec<f32>,
-    pub tile_size: Vec<f32>,
-    pub window_size: Vec<f32>,
-    pub tile_pos_in_workspace_view: Option<Vec<f32>>,
-    pub window_offset_in_tile: Vec<f32>,
+#[derive(Serialize, Deserialize)]
+pub struct WorkspacesChanged {
+    pub workspaces: Vec<Workspace>,
+}
+
+impl EventHandler for WorkspacesChanged {
+    fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
+        let workspaces: Vec<Arc<Workspace>> = self
+            .workspaces
+            .into_iter()
+            .map(Arc::new).collect();
+        println!("{:?}",workspaces);
+        let iter = workspaces.into_iter();
+
+        set_workspaces(iter.clone()).map_err(|_| HandlingError::Unknown)?;
+        event_channel
+            .send_blocking(UiEvent::WorkspacesChanged(Box::new(iter)))
+            .map_err(|_| HandlingError::ConnectionError)
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -190,26 +195,28 @@ pub struct Layout {
 #[derive(Serialize, Deserialize)]
 enum Event {
     WindowOpenedOrChanged(WindowOpenedOrChanged),
-    WorkspaceActiveWindowChanged(WorkspaceActiveWindowChanged),
     WindowFocusChanged(WindowFocusChanged),
     WorkspaceActivated(WorkspaceActivated),
     WindowsChanged(WindowsChanged),
+    WindowClosed(WindowClosed),
+    WorkspacesChanged(WorkspacesChanged)
+}
+impl std::fmt::Display for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            serde_json::to_string(&self).unwrap_or("Invalid event".to_string())
+        )
+    }
 }
 
 static REQUEST_SOCKET: OnceLock<UnixStream> = OnceLock::new();
 fn get_socket() -> &'static UnixStream {
     REQUEST_SOCKET.get_or_init(|| {
         let sock_path = env::var("NIRI_SOCKET").expect("NIRI_SOCKET missing");
-        UnixStream::connect(sock_path).expect("Connection failed")
+        UnixStream::connect(sock_path).expect("niri connection failed")
     })
-}
-
-pub fn get_window(window_id: &u64) -> Result<Arc<Window>, GetWindowError> {
-    let windows = get_windows().lock().map_err(|_| GetWindowError::Unknown)?;
-    if windows.contains_key(window_id) {
-        return Ok(windows[window_id].clone());
-    };
-    Err(GetWindowError::NotFound)
 }
 
 pub fn send_request(msg: &[u8]) -> std::io::Result<String> {
@@ -242,10 +249,8 @@ pub fn connect_event_stream(
                     continue;
                 }
             }
-            Err(e) => {
-                println!("{}", e);
-                continue;
-            }
+            Err(ref e) if e.is_data() => {}
+            Err(e) => eprintln!("{}", e),
         };
     }
 }

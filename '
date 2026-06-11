@@ -1,0 +1,68 @@
+use gpui::{App, AppContext, DisplayId};
+
+use ui::{
+    bar::{init_bar, open_window},
+    event::UiEvent,
+};
+
+use crate::ui::
+    workspaces::Workspaces
+;
+use crate::ui::monitor_select::new_monitor_select;
+mod compositor_ipc;
+mod config;
+mod consts;
+mod ui;
+
+fn main() {
+    gpui_platform::application().run(|app: &mut App| {
+        let async_app = app.to_async();
+        let (tx, display_rx) = smol::channel::unbounded::<DisplayId>();
+        for display in app.displays() {
+            new_monitor_select(app, display.id(), tx.clone());
+            println!("{}", display.uuid().into());
+        }
+        let workspaces_indicator = Workspaces::new_entity(app, "HDMI-A-1".to_string());
+        let bar = init_bar(app, workspaces_indicator.clone());
+        let (tx, rx) = smol::channel::unbounded::<UiEvent>();
+        let display = smol::block_on(display_rx.recv()).unwrap();
+        // NIRI IPC START
+        async_app
+            .background_executor()
+            .spawn(async {
+                compositor_ipc::niri::connect_event_stream(tx).unwrap();
+            })
+            .detach();
+        // START HANDLING EVENTS FROM NIRI IPC
+        let weak_bar = bar.downgrade();
+        async_app
+            .spawn(async move |cx| {
+                loop {
+                    let event = rx.recv().await.expect("smol channel disconnected");
+                    match event {
+                        UiEvent::FocusedWindowChanged(window) => {
+                            let Some(bar) = &weak_bar.upgrade() else {
+                                eprintln!("Can't get bar reference, it probably no longer exists");
+                                break;
+                            };
+                            cx.update_entity(bar, |bar, cx| {
+                                bar.window_title_text = window.title.clone().into();
+                                cx.notify();
+                            });
+                        }
+                        UiEvent::WorkspacesChanged(new_workspaces) => {
+                            cx.update_entity(
+                                &workspaces_indicator,
+                                |workspaces: &mut Workspaces, cx| {
+                                    workspaces.workspaces = new_workspaces.collect();
+                                    cx.notify();
+                                },
+                            );
+                        }
+                    };
+                }
+            })
+            .detach();
+        open_window(app, bar, display);
+    });
+}
