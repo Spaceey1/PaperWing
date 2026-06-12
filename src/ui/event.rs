@@ -1,109 +1,61 @@
-use std::{
-    collections::HashMap,
-    error::Error,
-    fmt,
-    ops::Deref,
-    sync::{Arc, LazyLock, LockResult, RwLock},
-};
+use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-use smol::lock::RwLockReadGuard;
+use gpui::{AsyncApp, WeakEntity};
 
-pub enum UiEvent
-{
+use crate::ui::bar::Bar;
+use crate::ui::state::*;
+use crate::ui::workspaces::Workspaces;
+use gpui::{App, AppContext};
+pub enum UiEvent {
     FocusedWindowChanged(Arc<Window>),
     WorkspacesChanged(Box<dyn Iterator<Item = Arc<Workspace>> + Send>),
     WorkspaceFocusChanged(u64),
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
-pub struct Window {
-    pub id: u64,
-    pub title: String,
-    pub app_id: String,
-    pub pid: u64,
-    pub workspace_id: u64,
-    pub is_focused: bool,
-    pub is_floating: bool,
-    pub is_urgent: bool,
-    pub layout: Layout,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default)]
-pub struct Layout {
-    pub pos_in_scrolling_layout: Vec<f32>,
-    pub tile_size: Vec<f32>,
-    pub window_size: Vec<f32>,
-    pub tile_pos_in_workspace_view: Option<Vec<f32>>,
-    pub window_offset_in_tile: Vec<f32>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default)]
-pub struct Workspace {
-    pub id: u64,
-    pub idx: u64,
-    pub name: Option<String>,
-    pub output: String,
-    pub is_urgent: bool,
-    pub is_active: bool,
-    pub is_focused: bool,
-    pub active_window_id: Option<i64>,
-}
-
-#[derive(Debug)]
-pub enum GetResourceError {
-    NotFound,
-    Unknown,
-}
-
-impl fmt::Display for GetResourceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            GetResourceError::Unknown => write!(f, "Something went wrong"),
-            GetResourceError::NotFound => write!(f, "Window not found"),
+macro_rules! upgrade_entity_safe {
+    ($entity:expr) => {
+        match $entity.upgrade() {
+            Some(v) => v,
+            None => {
+                eprintln!("Can't get entity reference, it probably no longer exists");
+                continue;
+            }
         }
-    }
-}
-
-impl std::error::Error for GetResourceError {}
-
-static WINDOWS: RwLock<LazyLock<HashMap<u64, Arc<Window>>>> =
-    RwLock::new(LazyLock::new(HashMap::new));
-pub fn get_window(window_id: &u64) -> Result<Arc<Window>, GetResourceError> {
-    let windows = WINDOWS.read().map_err(|_| GetResourceError::Unknown)?;
-    if windows.contains_key(window_id) {
-        return Ok(windows[window_id].clone());
     };
-    Err(GetResourceError::NotFound)
 }
-pub fn track_window(window: Window) -> Result<Arc<Window>, Box<dyn Error>> {
-    let mut windows = WINDOWS.write()?;
-    let window = Arc::new(window);
-    windows.insert(window.id, window.clone());
-    Ok(window)
-}
-pub fn remove_window(id: &u64) -> Result<Option<Arc<Window>>, Box<dyn Error>> {
-    let mut windows = WINDOWS.write()?;
-    Ok(windows.remove(id))
-}
-
-static WORKSPACES: RwLock<LazyLock<HashMap<u64, Arc<Workspace>>>> =
-    RwLock::new(LazyLock::new(HashMap::new));
-pub fn get_workspace(workspace_id: &u64) -> Result<Arc<Workspace>, GetResourceError> {
-    let workspaces = WORKSPACES.read().map_err(|_| GetResourceError::Unknown)?;
-    if workspaces.contains_key(workspace_id) {
-        return Ok(workspaces[workspace_id].clone());
-    };
-    Err(GetResourceError::NotFound)
-}
-pub fn set_workspaces<I>(new_workspaces: I) -> Result<(), Box<dyn Error>>
-where
-    I: IntoIterator<Item = Arc<Workspace>>,
-{
-    let mut workspaces = WORKSPACES.write()?;
-    workspaces.clear();
-    for new_workspace in new_workspaces {
-        workspaces.insert(new_workspace.id, new_workspace);
+pub async fn handle_compositor_events(
+    receiving_channel: smol::channel::Receiver<UiEvent>,
+    cx: &mut AsyncApp,
+    bar_entity: WeakEntity<Bar>,
+    workspaces_entity: WeakEntity<Workspaces>,
+) {
+    loop {
+        let event = receiving_channel
+            .recv()
+            .await
+            .expect("smol channel disconnected");
+        match event {
+            UiEvent::FocusedWindowChanged(window) => {
+                let bar = upgrade_entity_safe!(bar_entity);
+                cx.update_entity(&bar, |bar, cx| {
+                    bar.window_title_text = window.title.clone().into();
+                    cx.notify();
+                });
+            }
+            UiEvent::WorkspacesChanged(new_workspaces) => {
+                let workspaces = upgrade_entity_safe!(workspaces_entity);
+                cx.update_entity(&workspaces, |workspaces, cx| {
+                    workspaces.workspaces = new_workspaces.collect();
+                    cx.notify();
+                });
+            }
+            UiEvent::WorkspaceFocusChanged(new_focus) => {
+                let workspaces = upgrade_entity_safe!(workspaces_entity);
+                cx.update_entity(&workspaces, |workspaces, cx| {
+                    workspaces.focused_workspace = new_focus;
+                    cx.notify();
+                });
+            }
+        };
     }
-    Ok(())
 }

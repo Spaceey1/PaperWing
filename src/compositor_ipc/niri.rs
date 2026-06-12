@@ -9,6 +9,7 @@ use std::{
 };
 
 use crate::ui::event::*;
+use crate::ui::state::*;
 use smol::{channel::Sender, future::FutureExt, lock::Mutex};
 use std::os::unix::net::UnixStream;
 
@@ -183,7 +184,6 @@ pub struct WorkspacesChanged {
 impl EventHandler for WorkspacesChanged {
     fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
         let workspaces: Vec<Arc<Workspace>> = self.workspaces.into_iter().map(Arc::new).collect();
-        println!("{:?}", workspaces);
         let mut iter = workspaces.into_iter();
 
         set_workspaces(iter.clone()).map_err(|_| HandlingError::Unknown)?;

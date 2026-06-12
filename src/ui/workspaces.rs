@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gpui::{AppContext, AsyncApp, Entity, ParentElement, Render, Styled, div, rgb};
 
-use crate::ui::{consts::TEXT_COLOR, event::Workspace};
+use crate::ui::{consts::TEXT_COLOR, state::Workspace};
 pub struct Workspaces {
     pub workspaces: Vec<Arc<Workspace>>,
     pub focused_workspace: u64,

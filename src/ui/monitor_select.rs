@@ -1,11 +1,13 @@
+use std::rc::Rc;
+
 use gpui::{
-    AppContext, InteractiveElement, ParentElement, Render, Styled, div, px, size
+    AppContext, InteractiveElement, ParentElement, PlatformDisplay, Render, Styled, div, px, size
 };
 
 use crate::ui::consts::{BG_COLOR, TEXT_COLOR};
 pub struct MonitorSelect {
-    pub display: gpui::DisplayId,
-    pub sender: smol::channel::Sender<gpui::DisplayId>,
+    pub display: Rc<dyn gpui::PlatformDisplay>,
+    pub sender: smol::channel::Sender<Rc<dyn gpui::PlatformDisplay>>,
 }
 impl Render for MonitorSelect {
     fn render(
@@ -13,11 +15,12 @@ impl Render for MonitorSelect {
         _window: &mut gpui::Window,
         _cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        let display = self.display;
+        let display = self.display.clone();
         let sender = self.sender.clone();
         div()
             .id("btn")
             .on_mouse_down(gpui::MouseButton::Left, move |_, _, _| {
+                let display = display.clone();
                 smol::block_on(sender.send(display)).expect("Failed to send display");
             })
             .child("Select me")
@@ -30,9 +33,12 @@ impl Render for MonitorSelect {
 }
 pub fn new_monitor_select(
     cx: &mut gpui::App,
-    display: gpui::DisplayId,
-    callback: smol::channel::Sender<gpui::DisplayId>,
-) -> gpui::WindowHandle<MonitorSelect> {
+    display: Rc<dyn PlatformDisplay>,
+    callback: smol::channel::Sender<Rc<dyn PlatformDisplay>>,
+)
+-> gpui::WindowHandle<MonitorSelect>
+
+{
     println!("Opening window for {:?}", display);
     cx.open_window(
         gpui::WindowOptions {
@@ -50,7 +56,7 @@ pub fn new_monitor_select(
                 keyboard_interactivity: gpui::layer_shell::KeyboardInteractivity::None,
                 ..Default::default()
             }),
-            display_id: Some(display),
+            display_id: Some(display.id()),
             focus: false,
             ..Default::default()
         },
