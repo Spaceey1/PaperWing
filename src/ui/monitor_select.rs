@@ -1,8 +1,8 @@
-use std::hash::{DefaultHasher, Hash};
-
 use gpui::{
-    AppContext, InteractiveElement, ParentElement, Render, Styled, div, layer_shell::Anchor, px, rgb, size
+    AppContext, InteractiveElement, ParentElement, Render, Styled, div, px, size
 };
+
+use crate::ui::consts::{BG_COLOR, TEXT_COLOR};
 pub struct MonitorSelect {
     pub display: gpui::DisplayId,
     pub sender: smol::channel::Sender<gpui::DisplayId>,
@@ -18,12 +18,11 @@ impl Render for MonitorSelect {
         div()
             .id("btn")
             .on_mouse_down(gpui::MouseButton::Left, move |_, _, _| {
-                println!("clicked");
                 smol::block_on(sender.send(display)).expect("Failed to send display");
             })
             .child("Select me")
-            .bg(rgb(0x000000))
-            .text_color(rgb(0xffffff))
+            .bg(BG_COLOR)
+            .text_color(TEXT_COLOR)
             .text_align(gpui::TextAlign::Center)
             .self_center()
             .content_stretch()

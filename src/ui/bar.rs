@@ -39,6 +39,7 @@ impl Render for Bar {
             .text_align(gpui::TextAlign::Left)
             .self_center()
             .bg(BG_COLOR)
+            .rounded_lg()
             .child(self.workspaces.clone())
             .child(self.window_title_text.clone())
             .child(self.clock.clone())
@@ -52,11 +53,11 @@ pub fn open_window<T: Render>(app: &mut gpui::AsyncApp, root: Entity<T>, display
                 gpui::Point {
                     ..Default::default()
                 },
-                size(px(0.), BAR_HEIGHT),
+                size(px(400.), BAR_HEIGHT),
             ))),
             window_background: gpui::WindowBackgroundAppearance::Blurred,
             kind: gpui::WindowKind::LayerShell(gpui::layer_shell::LayerShellOptions {
-                anchor: Anchor::LEFT | Anchor::RIGHT | Anchor::TOP,
+                anchor: Anchor::RIGHT | Anchor::TOP,
                 layer: gpui::layer_shell::Layer::Top,
                 exclusive_zone: Some(BAR_HEIGHT),
                 keyboard_interactivity: gpui::layer_shell::KeyboardInteractivity::None,

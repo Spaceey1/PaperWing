@@ -73,18 +73,24 @@ pub struct Mode {
 
 #[derive(Serialize, Deserialize)]
 pub struct WorkspaceActivated {
-    pub id: i64,
+    pub id: u64,
     pub focused: bool,
 }
 impl EventHandler for WorkspaceActivated {
     fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
-        Ok(()) // TODO
+        if !self.focused {
+            return Ok(());
+        };
+        event_channel
+            .send_blocking(UiEvent::WorkspaceFocusChanged(self.id))
+            .map_err(|_| HandlingError::ConnectionError)
     }
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct WindowFocusChanged {
-    pub id: Option<u64>, }
+    pub id: Option<u64>,
+}
 impl EventHandler for WindowFocusChanged {
     fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
         fn send_empty(event_channel: Sender<UiEvent>) {
@@ -176,16 +182,19 @@ pub struct WorkspacesChanged {
 
 impl EventHandler for WorkspacesChanged {
     fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
-        let workspaces: Vec<Arc<Workspace>> = self
-            .workspaces
-            .into_iter()
-            .map(Arc::new).collect();
-        println!("{:?}",workspaces);
-        let iter = workspaces.into_iter();
+        let workspaces: Vec<Arc<Workspace>> = self.workspaces.into_iter().map(Arc::new).collect();
+        println!("{:?}", workspaces);
+        let mut iter = workspaces.into_iter();
 
         set_workspaces(iter.clone()).map_err(|_| HandlingError::Unknown)?;
         event_channel
-            .send_blocking(UiEvent::WorkspacesChanged(Box::new(iter)))
+            .send_blocking(UiEvent::WorkspacesChanged(Box::new(iter.clone())))
+            .map_err(|_| HandlingError::ConnectionError)?;
+        let Some(focused_workspace) = iter.find(|x| x.is_focused) else {
+            return Err(HandlingError::BadData);
+        };
+        event_channel
+            .send_blocking(UiEvent::WorkspaceFocusChanged(focused_workspace.id))
             .map_err(|_| HandlingError::ConnectionError)
     }
 }
@@ -199,7 +208,7 @@ enum Event {
     WorkspaceActivated(WorkspaceActivated),
     WindowsChanged(WindowsChanged),
     WindowClosed(WindowClosed),
-    WorkspacesChanged(WorkspacesChanged)
+    WorkspacesChanged(WorkspacesChanged),
 }
 impl std::fmt::Display for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

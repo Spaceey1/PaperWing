@@ -13,6 +13,7 @@ pub enum UiEvent
 {
     FocusedWindowChanged(Arc<Window>),
     WorkspacesChanged(Box<dyn Iterator<Item = Arc<Workspace>> + Send>),
+    WorkspaceFocusChanged(u64),
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
