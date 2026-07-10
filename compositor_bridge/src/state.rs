@@ -11,11 +11,11 @@ use smol::lock::RwLockReadGuard;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Window {
-    pub id: u64,
+    pub id: usize,
     pub title: String,
     pub app_id: String,
-    pub pid: u64,
-    pub workspace_id: u64,
+    pub pid: u32,
+    pub workspace_id: usize,
     pub is_focused: bool,
     pub is_floating: bool,
     pub is_urgent: bool,
@@ -33,14 +33,14 @@ pub struct Layout {
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Workspace {
-    pub id: u64,
-    pub idx: u64,
+    pub id: usize,
+    pub idx: usize,
     pub name: Option<String>,
     pub output: String,
     pub is_urgent: bool,
     pub is_active: bool,
     pub is_focused: bool,
-    pub active_window_id: Option<i64>,
+    pub active_window_id: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -60,9 +60,9 @@ impl fmt::Display for GetResourceError {
 
 impl std::error::Error for GetResourceError {}
 
-static WINDOWS: RwLock<LazyLock<HashMap<u64, Arc<Window>>>> =
+static WINDOWS: RwLock<LazyLock<HashMap<usize, Arc<Window>>>> =
     RwLock::new(LazyLock::new(HashMap::new));
-pub fn get_window(window_id: &u64) -> Result<Arc<Window>, GetResourceError> {
+pub fn get_window(window_id: &usize) -> Result<Arc<Window>, GetResourceError> {
     let windows = WINDOWS.read().map_err(|_| GetResourceError::Unknown)?;
     if windows.contains_key(window_id) {
         return Ok(windows[window_id].clone());
@@ -75,14 +75,14 @@ pub fn track_window(window: Window) -> Result<Arc<Window>, Box<dyn Error>> {
     windows.insert(window.id, window.clone());
     Ok(window)
 }
-pub fn remove_window(id: &u64) -> Result<Option<Arc<Window>>, Box<dyn Error>> {
+pub fn remove_window(id: &usize) -> Result<Option<Arc<Window>>, Box<dyn Error>> {
     let mut windows = WINDOWS.write()?;
     Ok(windows.remove(id))
 }
 
-static WORKSPACES: RwLock<LazyLock<HashMap<u64, Arc<Workspace>>>> =
+static WORKSPACES: RwLock<LazyLock<HashMap<usize, Arc<Workspace>>>> =
     RwLock::new(LazyLock::new(HashMap::new));
-pub fn get_workspace(workspace_id: &u64) -> Result<Arc<Workspace>, GetResourceError> {
+pub fn get_workspace(workspace_id: &usize) -> Result<Arc<Workspace>, GetResourceError> {
     let workspaces = WORKSPACES.read().map_err(|_| GetResourceError::Unknown)?;
     if workspaces.contains_key(workspace_id) {
         return Ok(workspaces[workspace_id].clone());

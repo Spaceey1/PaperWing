@@ -1,10 +1,7 @@
-use std::{
-    fs::File, io::Write, ops::Deref, path::PathBuf, sync::LazyLock
-};
+use std::{fs::File, io::Write, ops::Deref, path::PathBuf, sync::LazyLock};
 
 use crate::consts::APP_NAME;
 use directories::ProjectDirs;
-use gpui::accesskit::Uuid;
 
 static CONFIG_DIR: std::sync::LazyLock<ProjectDirs> =
     std::sync::LazyLock::new(|| ProjectDirs::from("", "", APP_NAME).unwrap());
@@ -28,7 +25,7 @@ fn load_config() -> Config {
             serde_json::from_reader::<_, Config>(std::io::BufReader::new(config_file))
                 .expect("Config is malformed")
         }
-        Err(_) => Config { display_id: None },
+        Err(_) => Config::default(),
     }
 }
 
@@ -47,6 +44,4 @@ pub fn save_config() -> serde_json::Result<()> {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Default)]
-pub struct Config {
-    pub display_id: Option<Uuid>,
-}
+pub struct Config {}

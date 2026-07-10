@@ -1,42 +1,21 @@
+use crate::HandlingError;
+use crate::compositor_event::CompositorEvent;
+use crate::state::*;
 use serde::{Deserialize, Serialize};
+use smol::channel::Sender;
+use std::ops::Deref;
+use std::os::unix::net::UnixStream;
+use std::sync::LazyLock;
 use std::{
-    collections::HashMap,
     env,
     error::Error,
-    fmt,
     io::{BufRead, BufReader, Write},
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
-
-use crate::ui::event::*;
-use crate::ui::state::*;
-use smol::{channel::Sender, future::FutureExt, lock::Mutex};
-use std::os::unix::net::UnixStream;
-
-#[derive(Debug)]
-pub enum HandlingError {
-    ConnectionError,
-    BadData,
-    Unknown,
-}
-
-impl fmt::Display for HandlingError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            HandlingError::ConnectionError => {
-                write!(f, "Connection with niri failed while handling event")
-            }
-            HandlingError::BadData => write!(f, "Event data was bad"),
-            HandlingError::Unknown => write!(f, "Something went wrong"),
-        }
-    }
-}
-
-impl std::error::Error for HandlingError {}
 
 #[enum_dispatch::enum_dispatch]
 trait EventHandler {
-    fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError>;
+    async fn handle(self, event_channel: &Sender<CompositorEvent>) -> Result<(), HandlingError>;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -74,44 +53,46 @@ pub struct Mode {
 
 #[derive(Serialize, Deserialize)]
 pub struct WorkspaceActivated {
-    pub id: u64,
+    pub id: usize,
     pub focused: bool,
 }
 impl EventHandler for WorkspaceActivated {
-    fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
+    async fn handle(self, event_channel: &Sender<CompositorEvent>) -> Result<(), HandlingError> {
         if !self.focused {
             return Ok(());
         };
         event_channel
-            .send_blocking(UiEvent::WorkspaceFocusChanged(self.id))
+            .send(CompositorEvent::WorkspaceFocusChanged(self.id))
+            .await
             .map_err(|_| HandlingError::ConnectionError)
     }
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct WindowFocusChanged {
-    pub id: Option<u64>,
+    pub id: Option<usize>,
 }
 impl EventHandler for WindowFocusChanged {
-    fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
-        fn send_empty(event_channel: Sender<UiEvent>) {
+    async fn handle(self, event_channel: &Sender<CompositorEvent>) -> Result<(), HandlingError> {
+        async fn send_empty(event_channel: &Sender<CompositorEvent>) {
             event_channel
-                .send_blocking(UiEvent::FocusedWindowChanged(Arc::new(Window {
+                .send(CompositorEvent::FocusedWindowChanged(Arc::new(Window {
                     title: "".to_string(),
                     ..Default::default()
                 })))
-                .ok();
+                .await.unwrap()
         }
         match self.id {
             Some(id) => {
                 match get_window(&id) {
                     Ok(window) => {
                         event_channel
-                            .send_blocking(UiEvent::FocusedWindowChanged(window))
+                            .send(CompositorEvent::FocusedWindowChanged(window))
+                            .await
                             .unwrap();
                     }
                     Err(GetResourceError::NotFound) => {
-                        send_empty(event_channel);
+                        send_empty(event_channel).await;
                         println!("Window with id {} not found", id);
                         return Ok(());
                     }
@@ -119,10 +100,10 @@ impl EventHandler for WindowFocusChanged {
                 };
             }
             None => {
-                send_empty(event_channel);
+                send_empty(event_channel).await;
             }
         }
-        Ok(()) // TODO
+        Ok(())
     }
 }
 
@@ -131,11 +112,12 @@ pub struct WindowOpenedOrChanged {
     window: Window,
 }
 impl EventHandler for WindowOpenedOrChanged {
-    fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
+    async fn handle(self, event_channel: &Sender<CompositorEvent>) -> Result<(), HandlingError> {
         let window = track_window(self.window).map_err(|_| HandlingError::Unknown)?;
         if window.is_focused {
             event_channel
-                .send_blocking(UiEvent::FocusedWindowChanged(window))
+                .send(CompositorEvent::FocusedWindowChanged(window))
+                .await
                 .ok();
         }
         Ok(())
@@ -147,12 +129,13 @@ pub struct WindowsChanged {
     pub windows: Vec<Window>,
 }
 impl EventHandler for WindowsChanged {
-    fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
+    async fn handle(self, event_channel: &Sender<CompositorEvent>) -> Result<(), HandlingError> {
         for window in self.windows.into_iter() {
             let window = track_window(window).map_err(|_| HandlingError::Unknown)?;
             if window.is_focused {
                 event_channel
-                    .send_blocking(UiEvent::FocusedWindowChanged(window.clone()))
+                    .send(CompositorEvent::FocusedWindowChanged(window.clone()))
+                    .await
                     .ok();
             }
         }
@@ -162,10 +145,10 @@ impl EventHandler for WindowsChanged {
 
 #[derive(Serialize, Deserialize)]
 pub struct WindowClosed {
-    pub id: u64,
+    pub id: usize,
 }
 impl EventHandler for WindowClosed {
-    fn handle(self, _event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
+    async fn handle(self, _event_channel: &Sender<CompositorEvent>) -> Result<(), HandlingError> {
         match remove_window(&self.id) {
             Ok(removed_window) => match removed_window {
                 Some(_) => Ok(()),
@@ -182,19 +165,21 @@ pub struct WorkspacesChanged {
 }
 
 impl EventHandler for WorkspacesChanged {
-    fn handle(self, event_channel: Sender<UiEvent>) -> Result<(), HandlingError> {
+    async fn handle(self, event_channel: &Sender<CompositorEvent>) -> Result<(), HandlingError> {
         let workspaces: Vec<Arc<Workspace>> = self.workspaces.into_iter().map(Arc::new).collect();
-        let mut iter = workspaces.into_iter();
+        let mut iter = workspaces.clone().into_iter(); // Cloning vec of arcs is fine
 
         set_workspaces(iter.clone()).map_err(|_| HandlingError::Unknown)?;
         event_channel
-            .send_blocking(UiEvent::WorkspacesChanged(Box::new(iter.clone())))
+            .send(CompositorEvent::WorkspacesChanged(workspaces))
+            .await
             .map_err(|_| HandlingError::ConnectionError)?;
         let Some(focused_workspace) = iter.find(|x| x.is_focused) else {
             return Err(HandlingError::BadData);
         };
         event_channel
-            .send_blocking(UiEvent::WorkspaceFocusChanged(focused_workspace.id))
+            .send(CompositorEvent::WorkspaceFocusChanged(focused_workspace.id))
+            .await
             .map_err(|_| HandlingError::ConnectionError)
     }
 }
@@ -220,17 +205,14 @@ impl std::fmt::Display for Event {
     }
 }
 
-static REQUEST_SOCKET: OnceLock<UnixStream> = OnceLock::new();
-fn get_socket() -> &'static UnixStream {
-    REQUEST_SOCKET.get_or_init(|| {
-        let sock_path = env::var("NIRI_SOCKET").expect("NIRI_SOCKET missing");
-        UnixStream::connect(sock_path).expect("niri connection failed")
-    })
-}
+static REQUEST_SOCKET: LazyLock<UnixStream> = LazyLock::new(|| {
+    let sock_path = env::var("NIRI_SOCKET").expect("NIRI_SOCKET missing");
+    UnixStream::connect(sock_path).expect("niri connection failed")
+});
 
-pub fn send_request(msg: &[u8]) -> std::io::Result<String> {
-    let mut sock = get_socket();
-    sock.write_all(msg)?;
+pub async fn send_request(msg: String) -> std::io::Result<String> {
+    let mut sock = REQUEST_SOCKET.deref();
+    sock.write_all(&format!("\"{}\"\n", msg).into_bytes())?;
     sock.flush()?;
     let mut reader = BufReader::new(sock);
     let mut result = String::new();
@@ -238,8 +220,8 @@ pub fn send_request(msg: &[u8]) -> std::io::Result<String> {
     Ok(result)
 }
 
-pub fn connect_event_stream(
-    event_channel: smol::channel::Sender<UiEvent>,
+pub async fn connect_event_stream(
+    event_channel: smol::channel::Sender<CompositorEvent>,
 ) -> Result<(), Box<dyn Error>> {
     let sock_path = env::var("NIRI_SOCKET")?;
     let mut socket = std::os::unix::net::UnixStream::connect(sock_path)?;
@@ -254,7 +236,8 @@ pub fn connect_event_stream(
         };
         match serde_json::from_str::<Event>(&buf) {
             Ok(event) => {
-                if event.handle(event_channel.clone()).is_err() {
+                println!("{}", event);
+                if event.handle(&event_channel).await.is_err() {
                     continue;
                 }
             }
