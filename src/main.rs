@@ -37,12 +37,8 @@ fn compositor_subscription(_state: &AppState) -> Subscription<Message> {
     Subscription::run(|| {
         iced::stream::channel::<Message>(100, |mut output: mpsc::Sender<Message>| async move {
             let (tx, rx) = smol::channel::unbounded::<CompositorEvent>();
-            std::thread::spawn(move || {
-                smol::block_on(async { compositor_bridge::start_event_stream(tx).await.unwrap() })
-            });
-            // using std::thread since the combination of smol::spawn + iced with smol feature +
-            // iced_layershell blocks this from running if it's on the same os thread for some
-            // fucking reason
+            smol::spawn(async move { compositor_bridge::start_event_stream(tx).await.unwrap() })
+                .detach();
             loop {
                 let event = rx.recv().await;
                 match event {
@@ -62,11 +58,7 @@ fn clock_subscription(_state: &AppState) -> Subscription<Message> {
             loop {
                 output.send(Message::Refresh).await.unwrap();
                 let now = chrono::Local::now();
-                let next_update = now
-                    .with_second(0)
-                    .unwrap()
-                    .with_nanosecond(0)
-                    .unwrap()
+                let next_update = now.with_second(0).unwrap().with_nanosecond(0).unwrap()
                     + chrono::Duration::minutes(1);
                 smol::Timer::after((next_update - now).to_std().unwrap()).await;
             }
@@ -212,6 +204,8 @@ fn view(state: &AppState) -> Element<'_, Message> {
 }
 
 fn main() {
+    // smol needs at least 2 threads for iced_layershell to not deadlock :/
+    unsafe { std::env::set_var("SMOL_THREADS", "2") };
     iced_layershell::application(AppState::default, || APP_NAME.to_string(), update, view)
         .subscription(|state| {
             Subscription::batch(
