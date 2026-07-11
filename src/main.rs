@@ -1,25 +1,27 @@
-use crate::consts::{COLLAPSE_TIME, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH};
-use crate::state::AppState;
-use chrono::Timelike;
-use compositor_bridge;
-use compositor_bridge::CompositorEvent;
-use compositor_bridge::state::Workspace;
-use iced::futures::SinkExt;
-use iced::futures::channel::mpsc;
-use iced::widget::container::transparent;
-use iced::widget::space::{horizontal, vertical};
-use iced::widget::{Row, column, container, row, text};
-use iced::{Element, Subscription, Task, Theme};
-use iced_layershell::reexport::Anchor;
-use iced_layershell::settings::LayerShellSettings;
-use iced_layershell::to_layer_message;
-use std::iter::once;
-use std::sync::Arc;
-use std::time::Duration;
 mod config;
 mod consts;
 mod helper;
 mod state;
+mod theme;
+use crate::{
+    consts::{COLLAPSE_TIME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
+    state::AppState,
+    theme::default_theme,
+};
+use chrono::Timelike;
+use compositor_bridge::{self, CompositorEvent, state::Workspace};
+use iced::{
+    Element, Subscription, Task, Theme,
+    futures::{SinkExt, channel::mpsc},
+    widget::{
+        Row, column, container, row,
+        space::{horizontal, vertical},
+        text,
+    },
+};
+use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
+use std::{sync::Arc, time::Duration};
+use theme::Rounded;
 
 #[to_layer_message]
 #[derive(Debug, Clone)]
@@ -30,6 +32,7 @@ enum Message {
     Refresh,
 }
 
+/// Iced subscription for ipc with a wayland compositor
 fn compositor_subscription(_state: &AppState) -> Subscription<Message> {
     Subscription::run(|| {
         iced::stream::channel::<Message>(100, |mut output: mpsc::Sender<Message>| async move {
@@ -57,6 +60,8 @@ fn clock_subscription(_state: &AppState) -> Subscription<Message> {
     iced::time::every(Duration::from_secs(1)).map(|_| Message::Refresh)
 }
 
+/// Takes a vector of workspaces and an AppState and assigns it to the state, while also updating
+/// the focused workspaces and sorting them by idx
 fn update_workspace_state(state: &mut AppState, mut workspaces: Vec<Arc<Workspace>>) {
     workspaces.sort_by(|a, b| a.idx.cmp(&b.idx));
     state.workspaces = workspaces;
@@ -68,19 +73,23 @@ fn update_workspace_state(state: &mut AppState, mut workspaces: Vec<Arc<Workspac
         .collect();
 }
 
+// most readable rust code competition
+//
+/// This is basically a recursive "animation" of the window size, taking how long it's been since
+/// the collapse event, and lerping the size based on that. multiplied by -1 if it's being
+/// uncollapsed instread of collapsed
+///
+/// TODO: use the actual iced animation type. I'm too lazy to figure this out rn and I found out
+/// about it's existance only after I wrote this mess.
 fn collapse_update(state: &mut AppState) -> Task<Message> {
     let diff = chrono::Local::now() - state.collapsed_time;
     if diff < COLLAPSE_TIME {
         let margin = WINDOW_HEIGHT as i32
-            - if state.collapsed {
-                ((diff.subsec_millis() as i64 + diff.num_seconds() * 1000) as f32
-                    / (COLLAPSE_TIME.subsec_millis() as i64 + COLLAPSE_TIME.num_seconds() * 1000)
-                        as f32
-                    * UP_TRAVEL as f32) as i32
-            } else {
-                1
-            };
-        // println!("1 {}", margin);
+            - ((diff.subsec_millis() as i64 + diff.num_seconds() * 1000) as f32
+                / (COLLAPSE_TIME.subsec_millis() as i64 + COLLAPSE_TIME.num_seconds() * 1000)
+                    as f32
+                * UP_TRAVEL as f32) as i32
+                * if state.collapsed { 1 } else { -1 };
         Task::batch([
             Task::done(Message::SizeChange((
                 WINDOW_WIDTH,
@@ -94,7 +103,6 @@ fn collapse_update(state: &mut AppState) -> Task<Message> {
         ])
     } else {
         let margin = WINDOW_HEIGHT - if state.collapsed { UP_TRAVEL } else { 1 };
-        // println!("2 {}", margin);
         Task::done(Message::SizeChange((
             WINDOW_WIDTH,
             margin.try_into().unwrap(),
@@ -148,31 +156,25 @@ fn view(state: &AppState) -> Element<'_, Message> {
     let time = chrono::Local::now();
     let window_text = helper::truncate(window_text, 40);
     let workspaces = Element::from(
-        Row::from_iter(
-            state
-                .workspaces
-                .iter()
-                .map(|w| {
-                    container(horizontal().height(20))
-                        .style(|theme: &Theme| {
-                            let palette = theme.extended_palette();
-                            container::Style::default().background(
-                                if state.focused_workspaces.contains(&w.id) {
-                                    palette.primary.base.color
-                                } else {
-                                    palette.background.base.color
-                                },
-                            )
-                        })
-                        .into()
-                })
-                .chain(once(Element::from(text!(
-                    "{:0>2}:{:0>2}",
-                    time.hour(),
-                    time.minute()
-                )))),
-        )
-        .align_y(iced::alignment::Vertical::Center),
+        row![
+            Element::from(Row::from_iter(state.workspaces.iter().map(|w| {
+                container(horizontal().height(20))
+                    .style(|theme: &Theme| {
+                        let palette = theme.extended_palette();
+                        container::Style::default()
+                            .background(if state.focused_workspaces.contains(&w.id) {
+                                palette.primary.base.color
+                            } else {
+                                palette.background.base.color
+                            })
+                            .rounded()
+                    })
+                    .into()
+            }))),
+            Element::from(text!("{:0>2}:{:0>2}", time.hour(), time.minute()))
+        ]
+        .align_y(iced::alignment::Vertical::Center)
+        .spacing(MARGINS),
     );
     let contents = if !state.collapsed {
         Element::from(column![
@@ -182,16 +184,18 @@ fn view(state: &AppState) -> Element<'_, Message> {
             workspaces
         ])
     } else {
-        Element::from(
-            container(workspaces)
-                .style(transparent)
-                .align_y(iced::alignment::Vertical::Center),
-        )
+        workspaces
     };
     container(contents)
         .align_y(iced::alignment::Vertical::Center)
-        .style(transparent)
+        .style(|_| {
+            let palette = default_theme(state.mode).palette();
+            container::Style::default()
+                .background(palette.background)
+                .rounded()
+        })
         .height(iced::Length::Fill)
+        .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
         .into()
 }
 
@@ -206,7 +210,7 @@ fn main() {
             layer_settings: LayerShellSettings {
                 anchor: Anchor::Top,
                 layer: iced_layershell::reexport::Layer::Top,
-                size: Some((WINDOW_WIDTH, WINDOW_HEIGHT)),
+                size: Some((WINDOW_WIDTH, WINDOW_HEIGHT - UP_TRAVEL)),
                 exclusive_zone: (WINDOW_HEIGHT - UP_TRAVEL) as i32,
                 keyboard_interactivity: iced_layershell::reexport::KeyboardInteractivity::None,
                 start_mode: iced_layershell::settings::StartMode::Active,
@@ -215,6 +219,7 @@ fn main() {
             },
             ..Default::default()
         })
+        .theme(theme::theme)
         .run()
         .unwrap();
 }

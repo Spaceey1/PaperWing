@@ -59,7 +59,6 @@ pub enum CompositorMessage {}
 #[async_trait::async_trait]
 trait Compositor: Sync + Send {
     fn is_running(&self) -> bool;
-    async fn send_message(&self, msg: CompositorMessage) -> Result<String, CompositorError>;
     async fn start_event_stream(
         &self,
         callback: smol::channel::Sender<compositor_event::CompositorEvent>,
@@ -73,9 +72,6 @@ struct Niri;
 impl Compositor for Niri {
     fn is_running(&self) -> bool {
         env::var("NIRI_SOCKET").is_ok()
-    }
-    async fn send_message(&self, msg: CompositorMessage) -> Result<String, CompositorError> {
-        match msg {}
     }
     async fn start_event_stream(
         &self,
@@ -137,6 +133,13 @@ macro_rules! get_compositor {
     };
 }
 
+/// Automatically detects and finds a supported wayland compositor, then starts listening to it's
+/// events. When an event happens `callback` will be called with the [`CompositorEvent`] enum corresponding to
+/// the event. 
+///
+/// This function will never return unless the stream got broken somehow.
+///
+/// Behaviour of this function with multiple wayland compositors running is undefined
 pub async fn start_event_stream(
     callback: smol::channel::Sender<compositor_event::CompositorEvent>,
 ) -> Result<(), CompositorError> {
@@ -147,10 +150,9 @@ pub async fn start_event_stream(
         .unwrap();
     Err(CompositorError::Unknown)
 }
-pub async fn send_message(msg: CompositorMessage) -> Result<String, CompositorError> {
-    let comp = get_compositor!();
-    comp.send_message(msg).await
-}
+/// Gets currently opened workspaces. The result is not sorted and the ordering is undefined.
+///
+/// Behaviour of this function with multiple wayland compositors running is undefined
 pub async fn get_workspaces() -> Result<Vec<Arc<Workspace>>, CompositorError> {
     let comp = get_compositor!();
     comp.get_workspaces().await
