@@ -20,7 +20,7 @@ use iced::{
     },
 };
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use theme::Rounded;
 
 #[to_layer_message]
@@ -57,7 +57,21 @@ fn compositor_subscription(_state: &AppState) -> Subscription<Message> {
 }
 
 fn clock_subscription(_state: &AppState) -> Subscription<Message> {
-    iced::time::every(Duration::from_secs(1)).map(|_| Message::Refresh)
+    Subscription::run(|| {
+        iced::stream::channel::<Message>(10, |mut output: mpsc::Sender<Message>| async move {
+            loop {
+                output.send(Message::Refresh).await.unwrap();
+                let now = chrono::Local::now();
+                let next_update = now
+                    .with_second(0)
+                    .unwrap()
+                    .with_nanosecond(0)
+                    .unwrap()
+                    + chrono::Duration::minutes(1);
+                smol::Timer::after((next_update - now).to_std().unwrap()).await;
+            }
+        })
+    })
 }
 
 /// Takes a vector of workspaces and an AppState and assigns it to the state, while also updating
@@ -82,13 +96,11 @@ fn update_workspace_state(state: &mut AppState, mut workspaces: Vec<Arc<Workspac
 /// TODO: use the actual iced animation type. I'm too lazy to figure this out rn and I found out
 /// about it's existance only after I wrote this mess.
 fn collapse_update(state: &mut AppState) -> Task<Message> {
-    let diff = chrono::Local::now() - state.collapsed_time;
+    let diff = std::time::Instant::now() - state.collapsed_time;
     if diff < COLLAPSE_TIME {
         let margin = WINDOW_HEIGHT as i32
-            - ((diff.subsec_millis() as i64 + diff.num_seconds() * 1000) as f32
-                / (COLLAPSE_TIME.subsec_millis() as i64 + COLLAPSE_TIME.num_seconds() * 1000)
-                    as f32
-                * UP_TRAVEL as f32) as i32
+            - ((diff.as_millis()) as f32 / (COLLAPSE_TIME.as_millis()) as f32 * UP_TRAVEL as f32)
+                as i32
                 * if state.collapsed { 1 } else { -1 };
         Task::batch([
             Task::done(Message::SizeChange((
@@ -139,7 +151,7 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         }
         Message::ToggleCollapse => {
             state.collapsed = !state.collapsed;
-            state.collapsed_time = chrono::Local::now();
+            state.collapsed_time = std::time::Instant::now();
             Task::done(Message::CollapseUpdate)
         }
         Message::CollapseUpdate => collapse_update(state),

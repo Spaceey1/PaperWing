@@ -8,7 +8,7 @@ pub struct AppState {
     pub focused_window: Option<Arc<Window>>,
     pub focused_workspaces: Vec<usize>,
     pub collapsed: bool,
-    pub collapsed_time: chrono::DateTime<chrono::Local>,
+    pub collapsed_time: std::time::Instant,
     pub mode: Option<Mode>,
 }
 
@@ -19,7 +19,7 @@ impl Default for AppState {
             focused_window: None,
             focused_workspaces: vec![],
             collapsed: true,
-            collapsed_time: chrono::DateTime::<chrono::Local>::default(),
+            collapsed_time: std::time::Instant::now(),
             mode: None,
         }
     }
