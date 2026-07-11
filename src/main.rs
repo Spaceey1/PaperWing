@@ -1,8 +1,5 @@
-use core::task;
-use std::iter::once;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
-
+use crate::consts::{COLLAPSE_TIME, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH};
+use crate::state::AppState;
 use chrono::Timelike;
 use compositor_bridge;
 use compositor_bridge::CompositorEvent;
@@ -16,9 +13,9 @@ use iced::{Element, Subscription, Task, Theme};
 use iced_layershell::reexport::Anchor;
 use iced_layershell::settings::LayerShellSettings;
 use iced_layershell::to_layer_message;
-
-use crate::consts::{COLLAPSE_TIME, UP_TRAVEL};
-use crate::state::AppState;
+use std::iter::once;
+use std::sync::Arc;
+use std::time::Duration;
 mod config;
 mod consts;
 mod helper;
@@ -60,7 +57,8 @@ fn clock_subscription(_state: &AppState) -> Subscription<Message> {
     iced::time::every(Duration::from_secs(1)).map(|_| Message::Refresh)
 }
 
-fn update_workspace_state(state: &mut AppState, workspaces: Vec<Arc<Workspace>>) {
+fn update_workspace_state(state: &mut AppState, mut workspaces: Vec<Arc<Workspace>>) {
+    workspaces.sort_by(|a, b| a.idx.cmp(&b.idx));
     state.workspaces = workspaces;
     state.focused_workspaces = state
         .workspaces
@@ -70,36 +68,43 @@ fn update_workspace_state(state: &mut AppState, workspaces: Vec<Arc<Workspace>>)
         .collect();
 }
 
-// fn collapse_update(state: &mut AppState) -> Task<Message> {
-//     let diff = chrono::Local::now() - state.collapsed_time;
-//     if diff < COLLAPSE_TIME {
-//         let margin = 100 - if state.collapsed {
-//             diff.subsec_millis() / COLLAPSE_TIME.subsec_millis() * UP_TRAVEL
-//         } else {
-//             1
-//         };
-//         println!("1 {}", margin);
-//         Task::batch([
-//             // 1. Immediately apply this frame's margin change
-//             Task::done(Message::SizeChange((margin.try_into().unwrap(), 400 ))),
-//             // 2. Wait 16ms, then call TickCollapse again (The "Recursion")
-//             Task::future(async {
-//                 smol::Timer::after(std::time::Duration::from_millis(16)).await;
-//                 // 60fps is 1 update every ~16ms
-//                 Message::CollapseUpdate
-//             }),
-//         ])
-//     } else {
-//         let margin = 100 - if state.collapsed { UP_TRAVEL } else { 1 };
-//         println!("2 {}", margin);
-//         Task::done(Message::SizeChange((margin.try_into().unwrap(), 400)))
-//     }
-// }
+fn collapse_update(state: &mut AppState) -> Task<Message> {
+    let diff = chrono::Local::now() - state.collapsed_time;
+    if diff < COLLAPSE_TIME {
+        let margin = WINDOW_HEIGHT as i32
+            - if state.collapsed {
+                ((diff.subsec_millis() as i64 + diff.num_seconds() * 1000) as f32
+                    / (COLLAPSE_TIME.subsec_millis() as i64 + COLLAPSE_TIME.num_seconds() * 1000)
+                        as f32
+                    * UP_TRAVEL as f32) as i32
+            } else {
+                1
+            };
+        // println!("1 {}", margin);
+        Task::batch([
+            Task::done(Message::SizeChange((
+                WINDOW_WIDTH,
+                margin.try_into().unwrap(),
+            ))),
+            Task::future(async {
+                // 60fps is 1 update every ~16ms
+                smol::Timer::after(std::time::Duration::from_millis(16)).await;
+                Message::CollapseUpdate
+            }),
+        ])
+    } else {
+        let margin = WINDOW_HEIGHT - if state.collapsed { UP_TRAVEL } else { 1 };
+        // println!("2 {}", margin);
+        Task::done(Message::SizeChange((
+            WINDOW_WIDTH,
+            margin.try_into().unwrap(),
+        )))
+    }
+}
 
 fn update(state: &mut AppState, message: Message) -> Task<Message> {
     match message {
         Message::CompositorMessage(event) => {
-            println!("{:?}", event);
             match event {
                 CompositorEvent::WorkspacesChanged(workspaces) => {
                     update_workspace_state(state, workspaces);
@@ -113,20 +118,14 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                     // I don't get information which workspace got unfocused, so have to request full state of all workspaces again
                     Task::future(async { compositor_bridge::get_workspaces().await }).map(
                         |result| match result {
-                            Ok(workspaces) => {
-                                println!("{:?}", workspaces);
-                                Message::CompositorMessage(CompositorEvent::WorkspacesChanged(
-                                    workspaces,
-                                ))
-                            }
+                            Ok(workspaces) => Message::CompositorMessage(
+                                CompositorEvent::WorkspacesChanged(workspaces),
+                            ),
                             Err(e) => {
                                 panic!("{}", e);
                             }
                         },
                     )
-                    // print!("aaaaaaaaa");
-                    // let workspaces = workspaces.collect();
-                    // update_workspace_state(state, workspaces);
                 }
             }
         }
@@ -135,7 +134,7 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             state.collapsed_time = chrono::Local::now();
             Task::done(Message::CollapseUpdate)
         }
-        // Message::CollapseUpdate => collapse_update(state),
+        Message::CollapseUpdate => collapse_update(state),
         _ => Task::none(),
     }
 }
@@ -168,12 +167,12 @@ fn view(state: &AppState) -> Element<'_, Message> {
                         .into()
                 })
                 .chain(once(Element::from(text!(
-                    "{}:{}",
+                    "{:0>2}:{:0>2}",
                     time.hour(),
                     time.minute()
                 )))),
         )
-        .height(30),
+        .align_y(iced::alignment::Vertical::Center),
     );
     let contents = if !state.collapsed {
         Element::from(column![
@@ -183,9 +182,17 @@ fn view(state: &AppState) -> Element<'_, Message> {
             workspaces
         ])
     } else {
-        Element::from(container(workspaces).style(transparent))
+        Element::from(
+            container(workspaces)
+                .style(transparent)
+                .align_y(iced::alignment::Vertical::Center),
+        )
     };
-    container(contents).style(transparent).into()
+    container(contents)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(transparent)
+        .height(iced::Length::Fill)
+        .into()
 }
 
 fn main() {
@@ -195,15 +202,15 @@ fn main() {
                 ([clock_subscription(state), compositor_subscription(state)]).into_iter(),
             )
         })
-        // .subscription(compositor_subscription)
         .settings(iced_layershell::settings::Settings {
             layer_settings: LayerShellSettings {
                 anchor: Anchor::Top,
                 layer: iced_layershell::reexport::Layer::Top,
-                size: Some((400, 300)),
-                exclusive_zone: 20,
+                size: Some((WINDOW_WIDTH, WINDOW_HEIGHT)),
+                exclusive_zone: (WINDOW_HEIGHT - UP_TRAVEL) as i32,
                 keyboard_interactivity: iced_layershell::reexport::KeyboardInteractivity::None,
                 start_mode: iced_layershell::settings::StartMode::Active,
+                margin: (3, 0, 0, 0),
                 ..Default::default()
             },
             ..Default::default()

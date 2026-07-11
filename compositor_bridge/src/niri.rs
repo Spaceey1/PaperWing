@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::HandlingError;
 use crate::compositor_event::CompositorEvent;
 use crate::state::*;
@@ -93,7 +94,7 @@ impl EventHandler for WindowFocusChanged {
                     }
                     Err(GetResourceError::NotFound) => {
                         send_empty(event_channel).await;
-                        println!("Window with id {} not found", id);
+                        eprintln!("Window with id {} not found", id);
                         return Ok(());
                     }
                     Err(_) => return Err(HandlingError::Unknown),
@@ -236,7 +237,6 @@ pub async fn connect_event_stream(
         };
         match serde_json::from_str::<Event>(&buf) {
             Ok(event) => {
-                println!("{}", event);
                 if event.handle(&event_channel).await.is_err() {
                     continue;
                 }

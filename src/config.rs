@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{fs::File, io::Write, ops::Deref, path::PathBuf, sync::LazyLock};
 
 use crate::consts::APP_NAME;

@@ -2,12 +2,10 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt,
-    ops::Deref,
-    sync::{Arc, LazyLock, LockResult, RwLock},
+    sync::{Arc, LazyLock, RwLock},
 };
 
 use serde::{Deserialize, Serialize};
-use smol::lock::RwLockReadGuard;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Window {
