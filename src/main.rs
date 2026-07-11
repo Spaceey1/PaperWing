@@ -4,7 +4,7 @@ mod helper;
 mod state;
 mod theme;
 use crate::{
-    consts::{COLLAPSE_TIME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
+    consts::{APP_NAME, COLLAPSE_TIME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
     state::AppState,
     theme::default_theme,
 };
@@ -200,7 +200,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
 }
 
 fn main() {
-    iced_layershell::application(AppState::default, || "gay".to_string(), update, view)
+    iced_layershell::application(AppState::default, || APP_NAME.to_string(), update, view)
         .subscription(|state| {
             Subscription::batch(
                 ([clock_subscription(state), compositor_subscription(state)]).into_iter(),

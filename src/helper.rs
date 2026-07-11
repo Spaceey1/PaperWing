@@ -5,3 +5,9 @@ pub fn truncate(s: &str, max_chars: usize) -> String {
         Some((idx, _)) => (s[..idx].to_string() + "...").to_owned(),
     }
 }
+#[macro_export]
+macro_rules! package_name {
+    () => {
+        env!("CARGO_PKG_NAME")
+    };
+}
