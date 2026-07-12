@@ -1,14 +1,13 @@
 use crate::ipc;
 use crate::theme::Rounded;
 use crate::{
-    consts::{APP_NAME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
+    consts::{APP_NAME, COLLAPSE_TIME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
     helper,
     state::AppState,
     theme::{self, default_theme},
 };
 use chrono::Timelike;
 use compositor_bridge::{self, CompositorEvent, state::Workspace};
-use iced::Alignment;
 use iced::{
     Element, Subscription, Task, Theme,
     futures::{SinkExt, channel::mpsc},
@@ -89,6 +88,14 @@ fn update_workspace_state(state: &mut AppState, mut workspaces: Vec<Arc<Workspac
         .collect();
 }
 
+// most readable rust code competition
+//
+/// This is basically a recursive "animation" of the window size, taking how long it's been since
+/// the collapse event, and lerping the size based on that. multiplied by -1 if it's being
+/// uncollapsed instread of collapsed
+///
+/// TODO: use the actual iced animation type. I'm too lazy to figure this out rn and I found out
+/// about it's existance only after I wrote this mess.
 fn update(state: &mut AppState, message: Message) -> Task<Message> {
     match message {
         Message::CompositorMessage(event) => {
@@ -144,30 +151,29 @@ fn view(state: &AppState) -> Element<'_, Message> {
     let time = chrono::Local::now();
     let window_text = helper::truncate(window_text, 40);
     let workspaces = Element::from(
-        Row::from_iter(state.workspaces.iter().map(|w| {
-            container(horizontal().height(20))
-                .style(|theme: &Theme| {
-                    let palette = theme.extended_palette();
-                    container::Style::default()
-                        .background(if state.focused_workspaces.contains(&w.id) {
-                            palette.primary.base.color
-                        } else {
-                            palette.background.base.color
-                        })
-                        .rounded()
-                })
-                .into()
-        }))
+        row![
+            Element::from(Row::from_iter(state.workspaces.iter().map(|w| {
+                container(horizontal().height(20))
+                    .style(|theme: &Theme| {
+                        let palette = theme.extended_palette();
+                        container::Style::default()
+                            .background(if state.focused_workspaces.contains(&w.id) {
+                                palette.primary.base.color
+                            } else {
+                                palette.background.base.color
+                            })
+                            .rounded()
+                    })
+                    .into()
+            }))),
+            Element::from(text!("{:0>2}:{:0>2}", time.hour(), time.minute()))
+        ]
         .align_y(iced::alignment::Vertical::Center)
         .spacing(MARGINS),
     );
     let contents = if !state.collapsed.value() {
         Element::from(column![
-            row![
-                text!("{}", window_text),
-                horizontal(),
-                Element::from(text!("{:0>2}:{:0>2}", time.hour(), time.minute()))
-            ],
+            row![text!("{}", window_text), horizontal(),],
             iced::widget::button(Element::from(text!("test"))).on_press(Message::ToggleCollapse),
             vertical(),
             workspaces
@@ -176,15 +182,15 @@ fn view(state: &AppState) -> Element<'_, Message> {
         workspaces
     };
     container(contents)
+        .align_y(iced::alignment::Vertical::Center)
         .style(|_| {
             let palette = default_theme(state.mode).palette();
             container::Style::default()
                 .background(palette.background)
                 .rounded()
         })
+        .height(iced::Length::Fill)
         .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
-        .align_bottom(iced::Length::Fill)
-        .align_y(Alignment::End)
         .into()
 }
 
