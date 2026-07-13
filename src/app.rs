@@ -1,30 +1,38 @@
+use crate::app::Message::Refresh;
 use crate::ipc;
 use crate::theme::Rounded;
+use crate::tray::{get_tray_host, tray_listiner};
 use crate::{
     consts::{APP_NAME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
     helper,
     state::AppState,
     theme::{self, default_theme},
 };
+use battery::units::ratio::percent;
 use chrono::Timelike;
 use compositor_bridge::{self, CompositorEvent, state::Workspace};
-use iced::Alignment;
+use iced::wgpu::Color;
+use iced::widget::{Button, button};
+use iced::{Alignment, Length};
 use iced::{
     Element, Subscription, Task, Theme,
     futures::{SinkExt, channel::mpsc},
     widget::{
-        Row, column, container, row,
+        Row, column, container, grid, row,
         space::{horizontal, vertical},
         text,
     },
 };
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
+use rustsni::{ItemId, TrayEvent, TrayHost, TrayItem};
 use std::sync::Arc;
 
 #[to_layer_message]
 #[derive(Debug, Clone)]
 pub enum Message {
     CompositorMessage(CompositorEvent),
+    TrayMessage(TrayEvent),
+    TrayAdded(ItemId, TrayItem),
     ToggleCollapse,
     AnimationUpdate,
     Refresh,
@@ -74,6 +82,10 @@ fn animation_subscription(state: &AppState) -> Subscription<Message> {
     } else {
         Subscription::none()
     }
+}
+
+fn tray_subscription() -> Subscription<Message> {
+    Subscription::run(|| iced::stream::channel(10, tray_listiner))
 }
 
 /// Takes a vector of workspaces and an AppState and assigns it to the state, while also updating
@@ -131,19 +143,48 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                     .round() as u32,
             )))
         }
+        Message::TrayMessage(msg) => {
+            match msg {
+                TrayEvent::ItemAdded(id) | TrayEvent::ItemChanged(id) => {
+                    let id2 = id.clone();
+                    return Task::future(async move {
+                        get_tray_host()
+                            .read()
+                            .await
+                            .items()
+                            .get(&id2)
+                            .unwrap()
+                            .clone()
+                    })
+                    .map(move |item| Message::TrayAdded(id.clone(), item));
+                }
+                TrayEvent::ItemRemoved(id) => {
+                    state.tray_icons.remove(&id);
+                }
+                TrayEvent::MenuActivationRequested(_) | TrayEvent::MenuChanged(_) => {}
+                TrayEvent::HostShutdown => panic!("Tray got shut down? Dont call shutdown."),
+            };
+            Task::none()
+        }
+        Message::TrayAdded(id, item) => {
+            state.tray_icons.insert(id, item);
+            Task::none()
+        }
         _ => Task::none(),
     }
 }
 
-fn view(state: &AppState) -> Element<'_, Message> {
+fn window_text(state: &AppState) -> Element<'_, Message> {
     let window_text = if state.focused_window.is_some() {
         &state.focused_window.as_ref().unwrap().title
     } else {
         &"".to_string()
     };
-    let time = chrono::Local::now();
-    let window_text = helper::truncate(window_text, 40);
-    let workspaces = Element::from(
+    let window_text = helper::truncate(window_text, 35);
+    text!("{}", window_text).into()
+}
+
+fn workspaces(state: &AppState) -> Row<'_, Message> {
         Row::from_iter(state.workspaces.iter().map(|w| {
             container(horizontal().height(20))
                 .style(|theme: &Theme| {
@@ -159,21 +200,95 @@ fn view(state: &AppState) -> Element<'_, Message> {
                 .into()
         }))
         .align_y(iced::alignment::Vertical::Center)
-        .spacing(MARGINS),
-    );
+        .spacing(MARGINS)
+}
+
+fn box_content<'a>(icon: &String, text: &String) -> Element<'a, Message> {
+    column![
+        text!("{}", icon).center().size(48).width(Length::Fill),
+        vertical(),
+        text!("{}", text).center().size(24).width(Length::Fill)
+    ]
+    .width(Length::Fill)
+    .into()
+}
+
+fn data_box<'a>(icon: &String, text: &String) -> Element<'a, Message> {
+    container(box_content(icon, text))
+        .padding(MARGINS as f32)
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style::default()
+                .rounded()
+                .background(palette.primary.weak.color)
+        })
+        .into()
+}
+
+fn button_box<'a>(icon: &String, text: &String) -> Button<'a, Message> {
+    button(box_content(icon, text))
+        .padding(MARGINS as f32)
+        .style(|theme, status| {
+            let palette = theme.extended_palette();
+            let mut p = button::Style::default()
+                .with_background(match status {
+                    button::Status::Hovered => palette.primary.base.color,
+                    button::Status::Pressed => palette.primary.strong.color,
+                    _ => palette.primary.weak.color,
+                })
+                .rounded();
+            p.text_color = theme.palette().text;
+            p
+        })
+}
+
+fn battery_indicators(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
+    let Ok(batteries) = state.battery.batteries() else {
+        return either::Left(std::iter::empty());
+    };
+    either::Right(batteries.flatten().map(|battery| {
+        data_box(
+            &"🔋".to_string(),
+            &format!(
+                "{:02.2}%",
+                battery.state_of_charge().get::<percent>().to_string()
+            ),
+        )
+    }))
+}
+
+fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
+    state
+        .tray_icons
+        .iter()
+        .map(|(_id, t)| data_box(&"A".to_string(), &t.tooltip.title))
+}
+
+fn view(state: &AppState) -> Element<'_, Message> {
     let contents = if !state.collapsed.value() {
-        Element::from(column![
-            row![
-                text!("{}", window_text),
-                horizontal(),
-                Element::from(text!("{:0>2}:{:0>2}", time.hour(), time.minute()))
-            ],
-            iced::widget::button(Element::from(text!("test"))).on_press(Message::ToggleCollapse),
-            vertical(),
-            workspaces
-        ])
+        let time = chrono::Local::now();
+        Element::from(
+            column![
+                row![
+                    window_text(state),
+                    horizontal(),
+                    Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
+                ],
+                iced::widget::scrollable(
+                    grid(battery_indicators(state).chain(tray_buttons(state)))
+                        .push(
+                            button_box(&"T".to_string(), &"toggle".to_string())
+                                .on_press(Message::ToggleCollapse),
+                        )
+                        .spacing(MARGINS),
+                ).height(Length::Fill),
+                // vertical(),
+                container(workspaces(state))
+            ]
+            .spacing(MARGINS),
+        )
     } else {
-        workspaces
+        workspaces(state).into()
     };
     container(contents)
         .style(|_| {
@@ -196,6 +311,7 @@ pub fn start_app() {
             Subscription::batch([
                 clock_subscription(),
                 ipc_subscription(),
+                tray_subscription(),
                 compositor_subscription(state),
                 animation_subscription(state),
             ])
@@ -203,7 +319,7 @@ pub fn start_app() {
         .settings(iced_layershell::settings::Settings {
             layer_settings: LayerShellSettings {
                 anchor: Anchor::Top,
-                layer: iced_layershell::reexport::Layer::Top,
+                layer: iced_layershell::reexport::Layer::Overlay,
                 size: Some((WINDOW_WIDTH, UP_TRAVEL)),
                 exclusive_zone: 4,
                 keyboard_interactivity: iced_layershell::reexport::KeyboardInteractivity::None,

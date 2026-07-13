@@ -6,6 +6,7 @@ mod helper;
 mod ipc;
 mod state;
 mod theme;
+mod tray;
 
 fn main() {
     match args().nth(1) {

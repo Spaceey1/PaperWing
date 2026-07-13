@@ -36,3 +36,9 @@ impl Rounded for iced::widget::container::Style {
         self.border(border)
     }
 }
+impl Rounded for iced::widget::button::Style {
+    fn rounded(mut self) -> Self {
+        self.border.radius = RADIUS.into();
+        self
+    }
+}
