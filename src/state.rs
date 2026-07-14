@@ -9,6 +9,7 @@ pub struct AppState {
     pub focused_workspaces: Vec<usize>,
     pub focused_window: Option<Arc<Window>>,
     pub collapsed: Animation<bool>,
+    pub menu_open: Animation<bool>,
     pub now: std::time::Instant,
     pub mode: Option<Mode>,
     pub battery: battery::Manager,
@@ -23,6 +24,9 @@ impl Default for AppState {
             focused_workspaces: vec![],
             tray_icons: HashMap::new(),
             collapsed: Animation::new(true)
+                .quick()
+                .easing(iced::animation::Easing::EaseInOut),
+            menu_open: Animation::new(false)
                 .quick()
                 .easing(iced::animation::Easing::EaseInOut),
             now: std::time::Instant::now(),

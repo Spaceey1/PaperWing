@@ -1,4 +1,4 @@
-use iced::theme::Base;
+use iced::{theme::Base, widget::Container};
 
 use crate::{
     consts::{APP_NAME, RADIUS},
@@ -29,6 +29,10 @@ pub trait Rounded {
     fn rounded(self) -> Self;
 }
 
+pub trait BackgoundContainer {
+    fn backgound_container(self, state: &AppState) -> Self;
+}
+
 impl Rounded for iced::widget::container::Style {
     fn rounded(self) -> Self {
         let mut border = self.border;
@@ -40,5 +44,13 @@ impl Rounded for iced::widget::button::Style {
     fn rounded(mut self) -> Self {
         self.border.radius = RADIUS.into();
         self
+    }
+}
+impl BackgoundContainer for iced::widget::container::Style {
+    fn backgound_container(self, state: &AppState) -> Self {
+        let palette = default_theme(state.mode).palette();
+        iced::widget::container::Style::default()
+            .background(palette.background)
+            .rounded()
     }
 }

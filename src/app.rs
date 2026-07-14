@@ -1,6 +1,7 @@
-use crate::app::Message::Refresh;
+use crate::consts::MENU_WIDTH;
+use crate::helper::debug_container;
 use crate::ipc;
-use crate::theme::Rounded;
+use crate::theme::{BackgoundContainer, Rounded};
 use crate::tray::{get_tray_host, tray_listiner};
 use crate::{
     consts::{APP_NAME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
@@ -11,9 +12,8 @@ use crate::{
 use battery::units::ratio::percent;
 use chrono::Timelike;
 use compositor_bridge::{self, CompositorEvent, state::Workspace};
-use iced::wgpu::Color;
 use iced::widget::{Button, button};
-use iced::{Alignment, Length};
+use iced::{Alignment, Length, debug};
 use iced::{
     Element, Subscription, Task, Theme,
     futures::{SinkExt, channel::mpsc},
@@ -24,7 +24,7 @@ use iced::{
     },
 };
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
-use rustsni::{ItemId, TrayEvent, TrayHost, TrayItem};
+use rustsni::{ItemId, TrayEvent, TrayItem};
 use std::sync::Arc;
 
 #[to_layer_message]
@@ -33,9 +33,19 @@ pub enum Message {
     CompositorMessage(CompositorEvent),
     TrayMessage(TrayEvent),
     TrayAdded(ItemId, TrayItem),
+    TrayPressed(ItemId),
     ToggleCollapse,
     AnimationUpdate,
     Refresh,
+}
+
+macro_rules! background_container {
+    ($container:ident, $state:ident) => {
+        $container.style(|_| iced::widget::container::Style::default().backgound_container($state))
+        // .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
+        // .align_bottom(iced::Length::Fill)
+        // .align_y(Alignment::End)
+    };
 }
 
 /// Iced subscription for ipc with a wayland compositor
@@ -77,7 +87,7 @@ fn ipc_subscription() -> Subscription<Message> {
 }
 
 fn animation_subscription(state: &AppState) -> Subscription<Message> {
-    if state.collapsed.is_animating(state.now) {
+    if state.collapsed.is_animating(state.now) || state.menu_open.is_animating(state.now) {
         iced::window::frames().map(|_| Message::AnimationUpdate)
     } else {
         Subscription::none()
@@ -135,13 +145,17 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         }
         Message::AnimationUpdate => {
             state.now = std::time::Instant::now();
-            Task::done(Message::SizeChange((
-                WINDOW_WIDTH,
-                state
-                    .collapsed
-                    .interpolate::<f32>(WINDOW_HEIGHT as f32, UP_TRAVEL as f32, state.now)
-                    .round() as u32,
-            )))
+            if state.collapsed.is_animating(state.now) {
+                Task::done(Message::SizeChange((
+                    WINDOW_WIDTH,
+                    state
+                        .collapsed
+                        .interpolate::<f32>(WINDOW_HEIGHT as f32, UP_TRAVEL as f32, state.now)
+                        .round() as u32,
+                )))
+            } else {
+                Task::none()
+            }
         }
         Message::TrayMessage(msg) => {
             match msg {
@@ -170,6 +184,11 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             state.tray_icons.insert(id, item);
             Task::none()
         }
+        Message::TrayPressed(_id) => {
+            state.now = std::time::Instant::now();
+            state.menu_open.go_mut(true, state.now);
+            Task::none()
+        }
         _ => Task::none(),
     }
 }
@@ -185,22 +204,22 @@ fn window_text(state: &AppState) -> Element<'_, Message> {
 }
 
 fn workspaces(state: &AppState) -> Row<'_, Message> {
-        Row::from_iter(state.workspaces.iter().map(|w| {
-            container(horizontal().height(20))
-                .style(|theme: &Theme| {
-                    let palette = theme.extended_palette();
-                    container::Style::default()
-                        .background(if state.focused_workspaces.contains(&w.id) {
-                            palette.primary.base.color
-                        } else {
-                            palette.background.base.color
-                        })
-                        .rounded()
-                })
-                .into()
-        }))
-        .align_y(iced::alignment::Vertical::Center)
-        .spacing(MARGINS)
+    Row::from_iter(state.workspaces.iter().map(|w| {
+        container(horizontal().height(20))
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style::default()
+                    .background(if state.focused_workspaces.contains(&w.id) {
+                        palette.primary.base.color
+                    } else {
+                        palette.background.base.color
+                    })
+                    .rounded()
+            })
+            .into()
+    }))
+    .align_y(iced::alignment::Vertical::Center)
+    .spacing(MARGINS)
 }
 
 fn box_content<'a>(icon: &String, text: &String) -> Element<'a, Message> {
@@ -258,16 +277,20 @@ fn battery_indicators(state: &AppState) -> impl Iterator<Item = Element<'_, Mess
 }
 
 fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
-    state
-        .tray_icons
-        .iter()
-        .map(|(_id, t)| data_box(&"A".to_string(), &t.tooltip.title))
+    state.tray_icons.iter().map(|(_id, t)| {
+        button_box(&"A".to_string(), &t.tooltip.title)
+            .on_press(Message::TrayPressed(t.id.clone()))
+            .into()
+    })
 }
 
 fn view(state: &AppState) -> Element<'_, Message> {
-    let contents = if !state.collapsed.value() {
+    if !state.collapsed.value() {
         let time = chrono::Local::now();
-        Element::from(
+        let menu_progress = state
+            .menu_open
+            .interpolate(0., MENU_WIDTH as f32, state.now);
+        let main = container(
             column![
                 row![
                     window_text(state),
@@ -281,26 +304,31 @@ fn view(state: &AppState) -> Element<'_, Message> {
                                 .on_press(Message::ToggleCollapse),
                         )
                         .spacing(MARGINS),
-                ).height(Length::Fill),
-                // vertical(),
+                )
+                .height(Length::Fill),
                 container(workspaces(state))
             ]
             .spacing(MARGINS),
         )
+        .width(WINDOW_WIDTH);
+        let main = background_container!(main, state);
+        let main_row = row![
+            main,
+            if state.menu_open.is_animating(state.now) || state.menu_open.value() {
+                println!("{menu_progress}");
+                let m = container(text!("test"))
+                    .width(menu_progress)
+                    .height(WINDOW_HEIGHT);
+                background_container!(m, state).into()
+            } else {
+                Element::from(debug_container(horizontal().into()))
+            }
+        ];
+        main_row.into()
     } else {
-        workspaces(state).into()
-    };
-    container(contents)
-        .style(|_| {
-            let palette = default_theme(state.mode).palette();
-            container::Style::default()
-                .background(palette.background)
-                .rounded()
-        })
-        .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
-        .align_bottom(iced::Length::Fill)
-        .align_y(Alignment::End)
-        .into()
+        let main = container(workspaces(state)).width(WINDOW_WIDTH);
+        row![background_container!(main, state), horizontal()].into()
+    }
 }
 
 pub fn start_app() {
@@ -320,7 +348,7 @@ pub fn start_app() {
             layer_settings: LayerShellSettings {
                 anchor: Anchor::Top,
                 layer: iced_layershell::reexport::Layer::Overlay,
-                size: Some((WINDOW_WIDTH, UP_TRAVEL)),
+                size: Some((WINDOW_WIDTH + MENU_WIDTH, UP_TRAVEL)),
                 exclusive_zone: 4,
                 keyboard_interactivity: iced_layershell::reexport::KeyboardInteractivity::None,
                 start_mode: iced_layershell::settings::StartMode::Active,
