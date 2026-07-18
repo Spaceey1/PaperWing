@@ -20,8 +20,10 @@ pub async fn tray_listiner(mut output: Sender<Message>) -> () {
     let fd = smol::Async::new(borrowed_fd).unwrap();
     loop {
         fd.readable().await.unwrap();
-        let mut host = host.write().await;
-        let events = smol::unblock(move || host.poll()).await.unwrap();
+        let events = {
+            let mut host = host.write().await;
+            smol::unblock(move || host.poll()).await.unwrap()
+        };
         for event in events {
             output.send(Message::TrayMessage(event)).await.unwrap();
         }

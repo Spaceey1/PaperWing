@@ -7,13 +7,15 @@ use crate::{
     consts::{APP_NAME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
     helper,
     state::AppState,
-    theme::{self, default_theme},
+    theme::{self},
 };
 use battery::units::ratio::percent;
 use chrono::Timelike;
-use compositor_bridge::{self, CompositorEvent, state::Workspace};
-use iced::widget::{Button, button};
-use iced::{Alignment, Length, debug};
+use compositor_bridge::CompositorEvent;
+use compositor_bridge::state::Workspace;
+use iced::Length;
+use iced::widget::scrollable::default;
+use iced::widget::{Button, button, scrollable};
 use iced::{
     Element, Subscription, Task, Theme,
     futures::{SinkExt, channel::mpsc},
@@ -24,7 +26,7 @@ use iced::{
     },
 };
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
-use rustsni::{ItemId, TrayEvent, TrayItem};
+use rustsni::{ItemId, MenuNode, TrayEvent, TrayItem};
 use std::sync::Arc;
 
 #[to_layer_message]
@@ -34,6 +36,9 @@ pub enum Message {
     TrayMessage(TrayEvent),
     TrayAdded(ItemId, TrayItem),
     TrayPressed(ItemId),
+    OpenTrayWith(Vec<MenuNode>, ItemId),
+    MenuEntryPressed(i32),
+    CloseTray,
     ToggleCollapse,
     AnimationUpdate,
     Refresh,
@@ -141,7 +146,11 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         Message::ToggleCollapse => {
             state.now = std::time::Instant::now();
             state.collapsed.go_mut(!state.collapsed.value(), state.now);
-            Task::none()
+            if state.collapsed.value() && state.menu_open.value() {
+                Task::done(Message::CloseTray)
+            } else {
+                Task::none()
+            }
         }
         Message::AnimationUpdate => {
             state.now = std::time::Instant::now();
@@ -184,9 +193,31 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             state.tray_icons.insert(id, item);
             Task::none()
         }
-        Message::TrayPressed(_id) => {
+        Message::TrayPressed(id) => {
+            let id2 = id.clone();
+            Task::future(async move { get_tray_host().write().await.get_menu(&id2, 0).unwrap() })
+                .map(move |items| Message::OpenTrayWith(items, id.clone()))
+            // TODO: fix probably unnecessary clones? I'm not sure why I have to clone here tbh
+        }
+        Message::OpenTrayWith(items, id) => {
+            state.menu_items = items;
+            state.menu_id = Some(id);
             state.now = std::time::Instant::now();
             state.menu_open.go_mut(true, state.now);
+            Task::none()
+        }
+        Message::MenuEntryPressed(id) => {
+            let menu_id = state.menu_id.clone();
+            smol::spawn(async move {
+                let mut menu = get_tray_host().write().await;
+                let Some(menu_id) = &menu_id else { return };
+                let _ = menu.menu_click(menu_id, id);
+            }).detach();
+            Task::done(Message::CloseTray)
+        }
+        Message::CloseTray => {
+            state.now = std::time::Instant::now();
+            state.menu_open.go_mut(false, state.now);
             Task::none()
         }
         _ => Task::none(),
@@ -285,6 +316,7 @@ fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> 
 }
 
 fn view(state: &AppState) -> Element<'_, Message> {
+    const MAIN_WIDTH: u32 = WINDOW_WIDTH - MENU_WIDTH * 2 - MARGINS * 2;
     if !state.collapsed.value() {
         let time = chrono::Local::now();
         let menu_progress = state
@@ -310,24 +342,58 @@ fn view(state: &AppState) -> Element<'_, Message> {
             ]
             .spacing(MARGINS),
         )
-        .width(WINDOW_WIDTH);
+        .width(MAIN_WIDTH);
         let main = background_container!(main, state);
-        let main_row = row![
+        let menu_opening = state.menu_open.is_animating(state.now) || state.menu_open.value();
+        let mut main_row = row![
+            horizontal(),
             main,
-            if state.menu_open.is_animating(state.now) || state.menu_open.value() {
-                println!("{menu_progress}");
-                let m = container(text!("test"))
-                    .width(menu_progress)
-                    .height(WINDOW_HEIGHT);
+            if menu_opening {
+                let m = container(
+                    scrollable(column(
+                        state
+                            .menu_items
+                            .iter()
+                            .map(|item| {
+                                if item.visible && item.label.len() > 0 {
+                                    Some(Element::from(
+                                        button(text!("{}", item.label))
+                                            .style(|theme, status| {
+                                                button::primary(theme, status).rounded()
+                                            })
+                                            .width(Length::Fill)
+                                            .on_press(Message::MenuEntryPressed(item.id)),
+                                    ))
+                                } else {
+                                    None
+                                }
+                            })
+                            .flatten(),
+                    ))
+                    .spacing(MARGINS)
+                    .width(Length::Fill),
+                )
+                .padding(iced::padding::horizontal(MARGINS))
+                .width(menu_progress)
+                .height(WINDOW_HEIGHT);
                 background_container!(m, state).into()
             } else {
-                Element::from(debug_container(horizontal().into()))
+                Element::from(horizontal())
             }
-        ];
+        ]
+        .spacing(MARGINS);
+        if menu_opening {
+            main_row = main_row.push(horizontal());
+        }
         main_row.into()
     } else {
-        let main = container(workspaces(state)).width(WINDOW_WIDTH);
-        row![background_container!(main, state), horizontal()].into()
+        let main = container(workspaces(state)).width(MAIN_WIDTH);
+        row![
+            horizontal(),
+            background_container!(main, state),
+            horizontal()
+        ]
+        .into()
     }
 }
 
@@ -348,7 +414,7 @@ pub fn start_app() {
             layer_settings: LayerShellSettings {
                 anchor: Anchor::Top,
                 layer: iced_layershell::reexport::Layer::Overlay,
-                size: Some((WINDOW_WIDTH + MENU_WIDTH, UP_TRAVEL)),
+                size: Some((WINDOW_WIDTH, UP_TRAVEL)),
                 exclusive_zone: 4,
                 keyboard_interactivity: iced_layershell::reexport::KeyboardInteractivity::None,
                 start_mode: iced_layershell::settings::StartMode::Active,

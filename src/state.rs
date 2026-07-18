@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use compositor_bridge::state::{Window, Workspace};
 use iced::{Animation, theme::Mode};
-use rustsni::{ItemId, TrayHost, TrayItem};
+use rustsni::{ItemId, MenuNode, TrayHost, TrayItem};
 
 pub struct AppState {
     pub workspaces: Vec<Arc<Workspace>>,
@@ -10,6 +10,8 @@ pub struct AppState {
     pub focused_window: Option<Arc<Window>>,
     pub collapsed: Animation<bool>,
     pub menu_open: Animation<bool>,
+    pub menu_items: Vec<MenuNode>,
+    pub menu_id: Option<ItemId>,
     pub now: std::time::Instant,
     pub mode: Option<Mode>,
     pub battery: battery::Manager,
@@ -22,6 +24,7 @@ impl Default for AppState {
             workspaces: vec![],
             focused_window: None,
             focused_workspaces: vec![],
+            menu_items: vec![],
             tray_icons: HashMap::new(),
             collapsed: Animation::new(true)
                 .quick()
@@ -29,6 +32,7 @@ impl Default for AppState {
             menu_open: Animation::new(false)
                 .quick()
                 .easing(iced::animation::Easing::EaseInOut),
+            menu_id: None,
             now: std::time::Instant::now(),
             mode: None,
             battery: battery::Manager::new().unwrap(),
