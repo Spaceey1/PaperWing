@@ -43,12 +43,10 @@ pub enum Message {
     Refresh,
 }
 
+// TODO: Make this into a function, I have no clue why I made it a macro
 macro_rules! background_container {
     ($container:ident, $state:ident) => {
         $container.style(|_| iced::widget::container::Style::default().backgound_container($state))
-        // .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
-        // .align_bottom(iced::Length::Fill)
-        // .align_y(Alignment::End)
     };
 }
 
