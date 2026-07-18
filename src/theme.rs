@@ -51,6 +51,5 @@ impl BackgoundContainer for iced::widget::container::Style {
         let palette = default_theme(state.mode).palette();
         iced::widget::container::Style::default()
             .background(palette.background)
-            .rounded()
     }
 }

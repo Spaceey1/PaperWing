@@ -1,4 +1,4 @@
-use crate::consts::MENU_WIDTH;
+use crate::consts::{MENU_WIDTH, RADIUS};
 use crate::ipc;
 use crate::theme::{BackgoundContainer, Rounded};
 use crate::tray::{get_tray_host, tray_listiner};
@@ -12,7 +12,6 @@ use battery::units::ratio::percent;
 use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use compositor_bridge::state::Workspace;
-use iced::Length;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{Button, button, scrollable};
 use iced::{
@@ -24,6 +23,7 @@ use iced::{
         text,
     },
 };
+use iced::{Length, border};
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
 use rustsni::{ItemId, MenuNode, TrayEvent, TrayItem};
 use std::sync::Arc;
@@ -41,13 +41,6 @@ pub enum Message {
     ToggleCollapse,
     AnimationUpdate,
     Refresh,
-}
-
-// TODO: Make this into a function, I have no clue why I made it a macro
-macro_rules! background_container {
-    ($container:ident, $state:ident) => {
-        $container.style(|_| iced::widget::container::Style::default().backgound_container($state))
-    };
 }
 
 /// Iced subscription for ipc with a wayland compositor
@@ -329,6 +322,11 @@ fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> 
 
 fn view(state: &AppState) -> Element<'_, Message> {
     const MAIN_WIDTH: u32 = WINDOW_WIDTH - MENU_WIDTH * 2 - MARGINS * 2;
+    let main_style = {
+        let mut s = container::Style::default().backgound_container(state);
+        s.border = s.border.rounded(border::bottom(RADIUS));
+        s
+    };
     if !state.collapsed.value() {
         let time = chrono::Local::now();
         let menu_progress = state
@@ -354,8 +352,8 @@ fn view(state: &AppState) -> Element<'_, Message> {
             ]
             .spacing(MARGINS),
         )
-        .width(MAIN_WIDTH);
-        let main = background_container!(main, state);
+        .width(MAIN_WIDTH)
+        .style(move |_| main_style.clone());
         let menu_opening = state.menu_open.is_animating(state.now) || state.menu_open.value();
         let mut main_row = row![
             horizontal(),
@@ -402,7 +400,12 @@ fn view(state: &AppState) -> Element<'_, Message> {
                 .padding(iced::padding::all(MARGINS))
                 .width(menu_progress)
                 .height(WINDOW_HEIGHT);
-                background_container!(m, state).into()
+                m.style(|_| {
+                    iced::widget::container::Style::default()
+                        .backgound_container(state)
+                        .rounded()
+                })
+                .into()
             } else {
                 Element::from(horizontal())
             }
@@ -413,13 +416,10 @@ fn view(state: &AppState) -> Element<'_, Message> {
         }
         main_row.into()
     } else {
-        let main = container(workspaces(state)).width(MAIN_WIDTH);
-        row![
-            horizontal(),
-            background_container!(main, state),
-            horizontal()
-        ]
-        .into()
+        let main = container(workspaces(state))
+            .width(MAIN_WIDTH)
+            .style(move |_| main_style);
+        row![horizontal(), main, horizontal()].into()
     }
 }
 
@@ -444,7 +444,7 @@ pub fn start_app() {
                 exclusive_zone: 4,
                 keyboard_interactivity: iced_layershell::reexport::KeyboardInteractivity::None,
                 start_mode: iced_layershell::settings::StartMode::Active,
-                margin: (2, 0, 0, 0),
+                margin: (0, 0, 0, 0),
                 ..Default::default()
             },
             ..Default::default()
