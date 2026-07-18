@@ -1,3 +1,6 @@
+// TODO: Make all the ids have their own types that are aliases of their current types to avoid
+// mixing them up.
+
 use std::{
     collections::HashMap,
     error::Error,
@@ -32,13 +35,49 @@ pub struct Layout {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Workspace {
     pub id: usize,
+    /// idx is the "number" of the workspace; for example when user "goes to workspace 1" they go to
+    /// workspace with idx: 1. This is not necessarely the actual id of the workspace it and doesn't
+    /// have to be unique.
     pub idx: usize,
+    /// Similar to idx
     pub name: Option<String>,
+    /// The physical output; a monitor, display, screen, vr headset, or whatever the compositor deems suitable
+    /// to show windows on
     pub output: String,
     pub is_urgent: bool,
     pub is_active: bool,
     pub is_focused: bool,
     pub active_window_id: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Output {
+    name: String,
+    make: String,
+    modes: Vec<Mode>,
+    current_mode: usize,
+    vrr_supported: bool,
+    vrr_enabled: bool,
+    logical: Logical,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Logical {
+    /// Logical x position
+    x: usize,
+    /// Logical y position
+    y: usize,
+    width: usize,
+    height: usize,
+    scale: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Mode {
+    width: usize,
+    height: usize,
+    refresh_rate: usize,
+    is_preferred: bool,
 }
 
 #[derive(Debug)]

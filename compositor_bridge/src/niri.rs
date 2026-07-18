@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use crate::HandlingError;
 use crate::compositor_event::CompositorEvent;
 use crate::state::*;
@@ -17,39 +16,6 @@ use std::{
 #[enum_dispatch::enum_dispatch]
 trait EventHandler {
     async fn handle(self, event_channel: &Sender<CompositorEvent>) -> Result<(), HandlingError>;
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Output {
-    name: String,
-    make: String,
-    model: String,
-    serial: String,
-    physical_size: Vec<i64>,
-    modes: Vec<Mode>,
-    current_mode: i64,
-    is_custom_mode: bool,
-    vrr_supported: bool,
-    vrr_enabled: bool,
-    logical: Logical,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Logical {
-    x: i64,
-    y: i64,
-    width: i64,
-    height: i64,
-    scale: i64,
-    transform: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Mode {
-    width: i64,
-    height: i64,
-    refresh_rate: i64,
-    is_preferred: bool,
 }
 
 #[derive(Serialize, Deserialize)]
