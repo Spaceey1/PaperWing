@@ -1,9 +1,7 @@
-use std::collections::HashMap;
 
 use iced::{Element, color, widget::container};
-use rustsni::{ItemId, TrayItem};
 
-use crate::{app::Message, tray::get_tray_host};
+use crate::app::Message;
 
 // https://stackoverflow.com/questions/38461429/how-can-i-truncate-a-string-to-have-at-most-n-characters
 pub fn truncate(s: &str, max_chars: usize) -> String {

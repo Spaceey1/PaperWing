@@ -1,5 +1,4 @@
 use crate::consts::MENU_WIDTH;
-use crate::helper::debug_container;
 use crate::ipc;
 use crate::theme::{BackgoundContainer, Rounded};
 use crate::tray::{get_tray_host, tray_listiner};
@@ -14,7 +13,7 @@ use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use compositor_bridge::state::Workspace;
 use iced::Length;
-use iced::widget::scrollable::default;
+use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{Button, button, scrollable};
 use iced::{
     Element, Subscription, Task, Theme,
@@ -106,7 +105,8 @@ fn tray_subscription() -> Subscription<Message> {
 /// Takes a vector of workspaces and an AppState and assigns it to the state, while also updating
 /// the focused workspaces and sorting them by idx
 fn update_workspace_state(state: &mut AppState, mut workspaces: Vec<Arc<Workspace>>) {
-    workspaces.sort_by(|a, b| a.idx.cmp(&b.idx));
+    // TODO: Make visible groups seperated by output instead of just sorting them
+    workspaces.sort_by(|a, b| a.output.cmp(&b.output).then_with(|| a.idx.cmp(&b.idx)));
     state.workspaces = workspaces;
     state.focused_workspaces = state
         .workspaces
@@ -212,7 +212,8 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 let mut menu = get_tray_host().write().await;
                 let Some(menu_id) = &menu_id else { return };
                 let _ = menu.menu_click(menu_id, id);
-            }).detach();
+            })
+            .detach();
             Task::done(Message::CloseTray)
         }
         Message::CloseTray => {
@@ -348,32 +349,37 @@ fn view(state: &AppState) -> Element<'_, Message> {
         let mut main_row = row![
             horizontal(),
             main,
+            // TODO: clean up this mess
             if menu_opening {
                 let m = container(
-                    scrollable(column(
-                        state
-                            .menu_items
-                            .iter()
-                            .map(|item| {
-                                if item.visible && item.label.len() > 0 {
-                                    Some(Element::from(
-                                        button(text!("{}", item.label))
-                                            .style(|theme, status| {
-                                                button::primary(theme, status).rounded()
-                                            })
-                                            .width(Length::Fill)
-                                            .on_press(Message::MenuEntryPressed(item.id)),
-                                    ))
-                                } else {
-                                    None
-                                }
-                            })
-                            .flatten(),
-                    ))
-                    .spacing(MARGINS)
+                    scrollable(
+                        column(
+                            state
+                                .menu_items
+                                .iter()
+                                .map(|item| {
+                                    if item.visible && item.label.len() > 0 {
+                                        Some(Element::from(
+                                            button(text!("{}", item.label))
+                                                .style(|theme, status| {
+                                                    button::primary(theme, status).rounded()
+                                                })
+                                                .width(Length::Fill)
+                                                .on_press(Message::MenuEntryPressed(item.id)),
+                                        ))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .flatten(),
+                        )
+                        .spacing(MARGINS),
+                    )
+                    .spacing(0)
+                    .direction(Direction::Vertical(Scrollbar::hidden()))
                     .width(Length::Fill),
                 )
-                .padding(iced::padding::horizontal(MARGINS))
+                .padding(iced::padding::all(MARGINS))
                 .width(menu_progress)
                 .height(WINDOW_HEIGHT);
                 background_container!(m, state).into()

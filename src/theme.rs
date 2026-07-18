@@ -1,4 +1,4 @@
-use iced::{theme::Base, widget::Container};
+use iced::theme::Base;
 
 use crate::{
     consts::{APP_NAME, RADIUS},

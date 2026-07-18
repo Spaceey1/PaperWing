@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use compositor_bridge::state::{Window, Workspace};
 use iced::{Animation, theme::Mode};
-use rustsni::{ItemId, MenuNode, TrayHost, TrayItem};
+use rustsni::{ItemId, MenuNode, TrayItem};
 
 pub struct AppState {
     pub workspaces: Vec<Arc<Workspace>>,
