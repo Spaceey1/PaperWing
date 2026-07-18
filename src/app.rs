@@ -169,15 +169,20 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 TrayEvent::ItemAdded(id) | TrayEvent::ItemChanged(id) => {
                     let id2 = id.clone();
                     return Task::future(async move {
-                        get_tray_host()
-                            .read()
-                            .await
-                            .items()
-                            .get(&id2)
-                            .unwrap()
-                            .clone()
+                        rustsni::Result::Ok(
+                            get_tray_host()?
+                                .read()
+                                .await
+                                .items()
+                                .get(&id2)
+                                .unwrap()
+                                .clone(),
+                        )
                     })
-                    .map(move |item| Message::TrayAdded(id.clone(), item));
+                    .map(move |item| match item {
+                        Ok(item) => Message::TrayAdded(id.clone(), item),
+                        Err(_) => Message::Refresh,
+                    });
                 }
                 TrayEvent::ItemRemoved(id) => {
                     state.tray_icons.remove(&id);
@@ -193,8 +198,13 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         }
         Message::TrayPressed(id) => {
             let id2 = id.clone();
-            Task::future(async move { get_tray_host().write().await.get_menu(&id2, 0).unwrap() })
-                .map(move |items| Message::OpenTrayWith(items, id.clone()))
+            Task::future(async move {
+                rustsni::Result::Ok(get_tray_host()?.write().await.get_menu(&id2, 0).unwrap())
+            })
+            .map(move |items| match items {
+                Ok(items) => Message::OpenTrayWith(items, id.clone()),
+                Err(_) => Message::Refresh,
+            })
             // TODO: fix probably unnecessary clones? I'm not sure why I have to clone here tbh
         }
         Message::OpenTrayWith(items, id) => {
@@ -207,7 +217,10 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         Message::MenuEntryPressed(id) => {
             let menu_id = state.menu_id.clone();
             smol::spawn(async move {
-                let mut menu = get_tray_host().write().await;
+                let Ok(menu) = get_tray_host() else {
+                    return;
+                };
+                let mut menu = menu.write().await;
                 let Some(menu_id) = &menu_id else { return };
                 let _ = menu.menu_click(menu_id, id);
             })
