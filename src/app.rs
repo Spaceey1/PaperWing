@@ -365,24 +365,33 @@ fn view(state: &AppState) -> Element<'_, Message> {
                 let m = container(
                     scrollable(
                         column(
-                            state
-                                .menu_items
-                                .iter()
-                                .map(|item| {
-                                    if item.visible && item.label.len() > 0 {
-                                        Some(Element::from(
-                                            button(text!("{}", item.label))
-                                                .style(|theme, status| {
-                                                    button::primary(theme, status).rounded()
-                                                })
-                                                .width(Length::Fill)
-                                                .on_press(Message::MenuEntryPressed(item.id)),
-                                        ))
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .flatten(),
+                            std::iter::once(
+                                row![
+                                    horizontal(),
+                                    button(text!("x")).on_press(Message::CloseTray)
+                                ]
+                                .into(),
+                            )
+                            .chain(
+                                state
+                                    .menu_items
+                                    .iter()
+                                    .map(|item| {
+                                        if item.visible && item.label.len() > 0 {
+                                            Some(Element::from(
+                                                button(text!("{}", item.label))
+                                                    .style(|theme, status| {
+                                                        button::primary(theme, status).rounded()
+                                                    })
+                                                    .width(Length::Fill)
+                                                    .on_press(Message::MenuEntryPressed(item.id)),
+                                            ))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .flatten(),
+                            ),
                         )
                         .spacing(MARGINS),
                     )
