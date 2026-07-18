@@ -23,6 +23,7 @@ use iced::{
         text,
     },
 };
+use iced::{Event, event, mouse};
 use iced::{Length, border};
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
 use rustsni::{ItemId, MenuNode, TrayEvent, TrayItem};
@@ -40,7 +41,17 @@ pub enum Message {
     CloseTray,
     ToggleCollapse,
     AnimationUpdate,
+    UnCollapse,
+    Collapse,
     Refresh,
+}
+
+fn window_hover_subscription() -> Subscription<Message> {
+    event::listen_with(|event, _, _| match event {
+        Event::Mouse(mouse::Event::CursorEntered) => Some(Message::UnCollapse),
+        Event::Mouse(mouse::Event::CursorLeft) => Some(Message::Collapse),
+        _ => None,
+    })
 }
 
 /// Iced subscription for ipc with a wayland compositor
@@ -134,10 +145,20 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 }
             }
         }
-        Message::ToggleCollapse => {
+        Message::ToggleCollapse => Task::done(if state.collapsed.value() {
+            Message::UnCollapse
+        } else {
+            Message::Collapse
+        }),
+        Message::UnCollapse => {
             state.now = std::time::Instant::now();
-            state.collapsed.go_mut(!state.collapsed.value(), state.now);
-            if state.collapsed.value() && state.menu_open.value() {
+            state.collapsed.go_mut(false, state.now);
+            Task::none()
+        }
+        Message::Collapse => {
+            state.now = std::time::Instant::now();
+            state.collapsed.go_mut(true, state.now);
+            if state.menu_open.value() {
                 Task::done(Message::CloseTray)
             } else {
                 Task::none()
@@ -340,12 +361,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
                     Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
                 ],
                 iced::widget::scrollable(
-                    grid(battery_indicators(state).chain(tray_buttons(state)))
-                        .push(
-                            button_box(&"T".to_string(), &"toggle".to_string())
-                                .on_press(Message::ToggleCollapse),
-                        )
-                        .spacing(MARGINS),
+                    grid(battery_indicators(state).chain(tray_buttons(state))).spacing(MARGINS),
                 )
                 .height(Length::Fill),
                 container(workspaces(state))
@@ -360,7 +376,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
             main,
             // TODO: clean up this mess
             if menu_opening {
-                let m = container(
+                container(
                     scrollable(
                         column(
                             std::iter::once(
@@ -399,8 +415,8 @@ fn view(state: &AppState) -> Element<'_, Message> {
                 )
                 .padding(iced::padding::all(MARGINS))
                 .width(menu_progress)
-                .height(WINDOW_HEIGHT);
-                m.style(|_| {
+                .height(WINDOW_HEIGHT)
+                .style(|_| {
                     iced::widget::container::Style::default()
                         .backgound_container(state)
                         .rounded()
@@ -432,6 +448,7 @@ pub fn start_app() {
                 clock_subscription(),
                 ipc_subscription(),
                 tray_subscription(),
+                window_hover_subscription(),
                 compositor_subscription(state),
                 animation_subscription(state),
             ])
