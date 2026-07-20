@@ -8,19 +8,20 @@ use crate::{
 pub fn default_theme(mode: Option<iced::theme::Mode>) -> iced::Theme {
     match mode {
         Some(iced::theme::Mode::Light) => iced::theme::Theme::Light,
-        _ => iced::theme::Theme::Dark,
+        _ => {
+            let theme = iced::theme::Theme::Dark;
+            let mut pal = theme.palette();
+            pal.background = iced::color!(0x020202);
+            pal.primary = iced::color!(0xa64dff);
+            iced::Theme::custom(format!("Default - {}", theme.name()), pal)
+        }
     }
 }
 
 pub fn theme(state: &AppState) -> iced::Theme {
     let theme = default_theme(state.mode);
     let mut palette = theme.palette();
-    palette.background = iced::Color {
-        r: 0.,
-        g: 0.,
-        b: 0.,
-        a: 0.,
-    };
+    palette.background = iced::color!(0, 0, 0, 0.);
     let name = format!("{} - {}", theme.name(), APP_NAME);
     return iced::Theme::custom(name, palette);
 }
@@ -49,7 +50,6 @@ impl Rounded for iced::widget::button::Style {
 impl BackgoundContainer for iced::widget::container::Style {
     fn backgound_container(self, state: &AppState) -> Self {
         let palette = default_theme(state.mode).palette();
-        iced::widget::container::Style::default()
-            .background(palette.background)
+        iced::widget::container::Style::default().background(palette.background)
     }
 }

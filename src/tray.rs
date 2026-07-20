@@ -1,7 +1,11 @@
-use std::{os::fd::BorrowedFd, sync::OnceLock};
+use std::{
+    os::fd::BorrowedFd,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use iced::futures::{SinkExt, channel::mpsc::Sender};
-use rustsni::TrayHost;
+use rustsni::{TrayHost, TrayItem};
 use smol::lock::RwLock;
 
 use crate::app::Message;
@@ -41,4 +45,28 @@ pub async fn tray_listiner(mut output: Sender<Message>) -> () {
             e => eprintln!("Tray crashed: {e}"),
         },
     }
+}
+
+pub fn get_tray_icon(item: &TrayItem) -> Option<PathBuf> {
+    for path in item.icon_search_paths() {
+        let Ok(files) = std::fs::read_dir(path) else {
+            eprintln!("Error while reading: {path}");
+            continue;
+        };
+        for file in files {
+            let Ok(file) = file else {
+                eprintln!("Error while reading file in: {path}");
+                continue;
+            };
+            let file_path = file.path();
+            let Some(file_stem) = file_path.file_stem().and_then(|f| f.to_str()) else {
+                continue;
+            };
+            let file_stem = file_stem.to_string();
+            if file_stem.to_string() == item.icon_name {
+                return Some(file_path);
+            }
+        }
+    }
+    None
 }

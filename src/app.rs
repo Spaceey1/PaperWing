@@ -1,7 +1,7 @@
-use crate::consts::{MENU_WIDTH, RADIUS};
+use crate::consts::{COLUMNS, MENU_WIDTH, RADIUS};
 use crate::ipc;
 use crate::theme::{BackgoundContainer, Rounded};
-use crate::tray::{get_tray_host, tray_listiner};
+use crate::tray::{get_tray_host, get_tray_icon, tray_listiner};
 use crate::{
     consts::{APP_NAME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
     helper,
@@ -23,10 +23,12 @@ use iced::{
         text,
     },
 };
-use iced::{Event, event, mouse};
+use iced::{Event, color, event, mouse};
 use iced::{Length, border};
+use iced_layershell::reexport::core::image::Handle;
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
 use rustsni::{ItemId, MenuNode, TrayEvent, TrayItem};
+use std::hash::Hash;
 use std::sync::Arc;
 
 #[to_layer_message]
@@ -166,17 +168,12 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         }
         Message::AnimationUpdate => {
             state.now = std::time::Instant::now();
-            if state.collapsed.is_animating(state.now) {
-                Task::done(Message::SizeChange((
-                    WINDOW_WIDTH,
-                    state
-                        .collapsed
-                        .interpolate::<f32>(WINDOW_HEIGHT as f32, UP_TRAVEL as f32, state.now)
-                        .round() as u32,
-                )))
-            } else {
-                Task::none()
-            }
+            let height = state
+                .collapsed
+                .interpolate::<f32>(WINDOW_HEIGHT as f32, UP_TRAVEL as f32, state.now)
+                .round() as u32;
+            // println!("{height}");
+            Task::done(Message::SizeChange((WINDOW_WIDTH, height)))
         }
         Message::TrayMessage(msg) => {
             match msg {
@@ -194,7 +191,16 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                         )
                     })
                     .map(move |item| match item {
-                        Ok(item) => Message::TrayAdded(id.clone(), item),
+                        Ok(mut item) => {
+                            // iced takes rgba but rustsni gives me argb, so rotating every 4
+                            // chunks 1 right converts it to the iced format
+                            for pixmap in item.icon_pixmaps.iter_mut() {
+                                for c in pixmap.data.chunks_mut(4) {
+                                    c.rotate_right(1);
+                                }
+                            }
+                            Message::TrayAdded(id.clone(), item)
+                        }
                         Err(_) => Message::Refresh,
                     });
                 }
@@ -211,6 +217,9 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::TrayPressed(id) => {
+            if state.menu_open.value() && state.menu_id == Some(id.clone()) {
+                return Task::done(Message::CloseTray);
+            }
             let id2 = id.clone();
             Task::future(async move {
                 rustsni::Result::Ok(get_tray_host()?.write().await.get_menu(&id2, 0).unwrap())
@@ -229,14 +238,15 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::MenuEntryPressed(id) => {
-            let menu_id = state.menu_id.clone();
+            let Some(menu_id) = state.menu_id.clone() else {
+                return Task::done(Message::CloseTray);
+            };
             smol::spawn(async move {
                 let Ok(menu) = get_tray_host() else {
                     return;
                 };
                 let mut menu = menu.write().await;
-                let Some(menu_id) = &menu_id else { return };
-                let _ = menu.menu_click(menu_id, id);
+                let _ = menu.menu_click(&menu_id, id);
             })
             .detach();
             Task::done(Message::CloseTray)
@@ -276,6 +286,7 @@ fn workspaces(state: &AppState) -> Row<'_, Message> {
             .into()
     }))
     .align_y(iced::alignment::Vertical::Center)
+    .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
     .spacing(MARGINS)
 }
 
@@ -304,18 +315,56 @@ fn data_box<'a>(icon: &String, text: &String) -> Element<'a, Message> {
 fn button_box<'a>(icon: &String, text: &String) -> Button<'a, Message> {
     button(box_content(icon, text))
         .padding(MARGINS as f32)
-        .style(|theme, status| {
-            let palette = theme.extended_palette();
-            let mut p = button::Style::default()
-                .with_background(match status {
-                    button::Status::Hovered => palette.primary.base.color,
-                    button::Status::Pressed => palette.primary.strong.color,
-                    _ => palette.primary.weak.color,
-                })
-                .rounded();
-            p.text_color = theme.palette().text;
-            p
+        .style(button_style)
+}
+
+struct TrayItemWrapper<'a>(pub &'a TrayItem);
+
+impl<'a> Hash for TrayItemWrapper<'a> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.id.to_string().hash(state)
+    }
+}
+
+fn tray_button<'a>(item: &'a TrayItem) -> Button<'a, Message> {
+    let image = iced::widget::lazy(TrayItemWrapper { 0: item }, |item| {
+        let item = item.0;
+        match get_tray_icon(item) {
+            Some(path) => Element::from(iced::widget::Image::new(Handle::from_path(path))),
+            None => match item.best_icon_pixmap() {
+                Some(pixmap) => Element::from(iced::widget::Image::new(Handle::from_rgba(
+                    pixmap.width,
+                    pixmap.height,
+                    pixmap.data.clone(),
+                ))),
+                None => {
+                    println!("{}", item.icon_name);
+                    println!("{:?}", item.icon_search_paths());
+                    let icon = item.title.chars().nth(0).unwrap_or('⊟').to_uppercase();
+                    println!("{}", item.title);
+
+                    Element::from(button_box(&icon.to_string(), &item.title))
+                }
+            },
+        }
+    });
+    button(container(image).padding(MARGINS as f32)).style(button_style)
+}
+
+fn button_style(
+    theme: &iced::Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    let palette = theme.extended_palette();
+    let mut p = button::Style::default()
+        .with_background(match status {
+            button::Status::Hovered => palette.primary.base.color,
+            button::Status::Pressed => palette.primary.strong.color,
+            _ => palette.primary.weak.color,
         })
+        .rounded();
+    p.text_color = theme.palette().text;
+    p
 }
 
 fn battery_indicators(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
@@ -335,7 +384,7 @@ fn battery_indicators(state: &AppState) -> impl Iterator<Item = Element<'_, Mess
 
 fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
     state.tray_icons.iter().map(|(_id, t)| {
-        button_box(&"A".to_string(), &t.tooltip.title)
+        tray_button(&t)
             .on_press(Message::TrayPressed(t.id.clone()))
             .into()
     })
@@ -359,9 +408,12 @@ fn view(state: &AppState) -> Element<'_, Message> {
                     window_text(state),
                     horizontal(),
                     Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
-                ],
+                ]
+                .padding(iced::padding::horizontal(MARGINS)),
                 iced::widget::scrollable(
-                    grid(battery_indicators(state).chain(tray_buttons(state))).spacing(MARGINS),
+                    grid(battery_indicators(state).chain(tray_buttons(state)))
+                        .spacing(MARGINS)
+                        .columns(COLUMNS),
                 )
                 .height(Length::Fill),
                 container(workspaces(state))
@@ -432,9 +484,9 @@ fn view(state: &AppState) -> Element<'_, Message> {
         }
         main_row.into()
     } else {
-        let main = container(workspaces(state))
-            .width(MAIN_WIDTH)
-            .style(move |_| main_style);
+        let main = container(column![vertical(), container(workspaces(state))])
+            .style(move |_| main_style)
+            .width(MAIN_WIDTH);
         row![horizontal(), main, horizontal()].into()
     }
 }

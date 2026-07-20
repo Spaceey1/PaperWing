@@ -7,7 +7,7 @@ edition = "2024"
 directories = "6.0.0"
 smol = "2.0.2"
 compositor_bridge = { path = "./compositor_bridge" }
-iced = { version = "0.14.0", features = ["smol", "lazy"] }
+iced = { version = "0.14.0", features = ["smol", "lazy", "image"] }
 iced_layershell = { version = "0.18.1", features = ["unconditional-rendering"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"

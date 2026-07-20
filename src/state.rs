@@ -28,7 +28,7 @@ impl Default for AppState {
             tray_icons: HashMap::new(),
             collapsed: Animation::new(true)
                 .quick()
-                .easing(iced::animation::Easing::EaseInOut),
+                .easing(iced::animation::Easing::EaseOutQuad),
             menu_open: Animation::new(false)
                 .quick()
                 .easing(iced::animation::Easing::EaseInOut),
