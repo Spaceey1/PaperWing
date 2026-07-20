@@ -6,4 +6,4 @@ pub const WINDOW_HEIGHT: u32 = 300;
 pub const MENU_WIDTH: u32 = 150;
 pub const RADIUS: u32 = 6;
 pub const MARGINS: u32 = 10;
-pub const COLUMNS: usize = 5;
+pub const COLUMNS: usize = 4;

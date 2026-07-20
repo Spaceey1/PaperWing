@@ -23,7 +23,7 @@ use iced::{
         text,
     },
 };
-use iced::{Event, color, event, mouse};
+use iced::{Event, event, mouse};
 use iced::{Length, border};
 use iced_layershell::reexport::core::image::Handle;
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
@@ -302,7 +302,7 @@ fn box_content<'a>(icon: &String, text: &String) -> Element<'a, Message> {
 
 fn data_box<'a>(icon: &String, text: &String) -> Element<'a, Message> {
     container(box_content(icon, text))
-        .padding(MARGINS as f32)
+        .padding(iced::padding::all(MARGINS))
         .style(|theme: &Theme| {
             let palette = theme.extended_palette();
             container::Style::default()
@@ -314,7 +314,7 @@ fn data_box<'a>(icon: &String, text: &String) -> Element<'a, Message> {
 
 fn button_box<'a>(icon: &String, text: &String) -> Button<'a, Message> {
     button(box_content(icon, text))
-        .padding(MARGINS as f32)
+        .padding(iced::padding::all(MARGINS))
         .style(button_style)
 }
 
@@ -330,13 +330,21 @@ fn tray_button<'a>(item: &'a TrayItem) -> Button<'a, Message> {
     let image = iced::widget::lazy(TrayItemWrapper { 0: item }, |item| {
         let item = item.0;
         match get_tray_icon(item) {
-            Some(path) => Element::from(iced::widget::Image::new(Handle::from_path(path))),
+            Some(path) => Element::from(
+                iced::widget::Image::new(Handle::from_path(path))
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            ),
             None => match item.best_icon_pixmap() {
-                Some(pixmap) => Element::from(iced::widget::Image::new(Handle::from_rgba(
-                    pixmap.width,
-                    pixmap.height,
-                    pixmap.data.clone(),
-                ))),
+                Some(pixmap) => Element::from(
+                    iced::widget::Image::new(Handle::from_rgba(
+                        pixmap.width,
+                        pixmap.height,
+                        pixmap.data.clone(),
+                    ))
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+                ),
                 None => {
                     println!("{}", item.icon_name);
                     println!("{:?}", item.icon_search_paths());
@@ -348,7 +356,7 @@ fn tray_button<'a>(item: &'a TrayItem) -> Button<'a, Message> {
             },
         }
     });
-    button(container(image).padding(MARGINS as f32)).style(button_style)
+    button(container(image).padding(iced::padding::all(MARGINS))).style(button_style)
 }
 
 fn button_style(
@@ -386,6 +394,8 @@ fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> 
     state.tray_icons.iter().map(|(_id, t)| {
         tray_button(&t)
             .on_press(Message::TrayPressed(t.id.clone()))
+            .height(Length::Fill)
+            .width(Length::Fill)
             .into()
     })
 }
@@ -408,8 +418,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
                     window_text(state),
                     horizontal(),
                     Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
-                ]
-                .padding(iced::padding::horizontal(MARGINS)),
+                ],
                 iced::widget::scrollable(
                     grid(battery_indicators(state).chain(tray_buttons(state)))
                         .spacing(MARGINS)
@@ -420,6 +429,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
             ]
             .spacing(MARGINS),
         )
+        .padding(iced::padding::horizontal(MARGINS))
         .width(MAIN_WIDTH)
         .style(move |_| main_style.clone());
         let menu_opening = state.menu_open.is_animating(state.now) || state.menu_open.value();
@@ -465,7 +475,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
                     .direction(Direction::Vertical(Scrollbar::hidden()))
                     .width(Length::Fill),
                 )
-                .padding(iced::padding::all(MARGINS))
+                .padding(iced::padding::horizontal(MARGINS))
                 .width(menu_progress)
                 .height(WINDOW_HEIGHT)
                 .style(|_| {

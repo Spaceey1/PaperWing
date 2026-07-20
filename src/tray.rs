@@ -1,6 +1,6 @@
 use std::{
     os::fd::BorrowedFd,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::OnceLock,
 };
 
@@ -50,12 +50,10 @@ pub async fn tray_listiner(mut output: Sender<Message>) -> () {
 pub fn get_tray_icon(item: &TrayItem) -> Option<PathBuf> {
     for path in item.icon_search_paths() {
         let Ok(files) = std::fs::read_dir(path) else {
-            eprintln!("Error while reading: {path}");
             continue;
         };
         for file in files {
             let Ok(file) = file else {
-                eprintln!("Error while reading file in: {path}");
                 continue;
             };
             let file_path = file.path();
