@@ -1,8 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use compositor_bridge::state::{Window, Workspace};
+use compositor_bridge::{CompositorEvent, state::{Window, Workspace}};
 use iced::{Animation, theme::Mode};
-use rustsni::{ItemId, MenuNode, TrayItem};
+use iced_layershell::to_layer_message;
+use rustsni::{ItemId, MenuNode, TrayEvent, TrayItem};
 
 pub struct AppState {
     pub workspaces: Vec<Arc<Workspace>>,
@@ -38,4 +39,21 @@ impl Default for AppState {
             battery: battery::Manager::new().unwrap(),
         }
     }
+}
+
+#[to_layer_message]
+#[derive(Debug, Clone)]
+pub enum Message {
+    CompositorMessage(CompositorEvent),
+    TrayMessage(TrayEvent),
+    TrayAdded(ItemId, TrayItem),
+    TrayPressed(ItemId),
+    OpenTrayWith(Vec<MenuNode>, ItemId),
+    MenuEntryPressed(i32),
+    CloseTray,
+    ToggleCollapse,
+    AnimationUpdate,
+    UnCollapse,
+    Collapse,
+    Refresh,
 }

@@ -8,7 +8,7 @@ use iced::futures::{SinkExt, channel::mpsc::Sender};
 use rustsni::{TrayHost, TrayItem};
 use smol::lock::RwLock;
 
-use crate::app::Message;
+use crate::state::Message;
 
 static HOST: OnceLock<RwLock<TrayHost>> = OnceLock::new();
 

@@ -1,110 +1,31 @@
 use crate::consts::{COLUMNS, MENU_WIDTH, RADIUS};
-use crate::ipc;
-use crate::theme::{BackgoundContainer, Rounded};
-use crate::tray::{get_tray_host, get_tray_icon, tray_listiner};
+use crate::elements::*;
+use crate::state::Message;
+use crate::subscriptions::*;
+use crate::theme::{BackgoundContainer, Rounded, button_style};
+use crate::tray::get_tray_host;
 use crate::{
     consts::{APP_NAME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
-    helper,
     state::AppState,
     theme::{self},
 };
-use battery::units::ratio::percent;
 use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use compositor_bridge::state::Workspace;
 use iced::widget::scrollable::{Direction, Scrollbar};
-use iced::widget::{Button, button, scrollable};
+use iced::widget::{button, scrollable};
 use iced::{
-    Element, Subscription, Task, Theme,
-    futures::{SinkExt, channel::mpsc},
+    Element, Subscription, Task,
     widget::{
-        Row, column, container, grid, row,
+        column, container, grid, row,
         space::{horizontal, vertical},
         text,
     },
 };
-use iced::{Event, event, mouse};
 use iced::{Length, border};
-use iced_layershell::reexport::core::image::Handle;
-use iced_layershell::{reexport::Anchor, settings::LayerShellSettings, to_layer_message};
-use rustsni::{ItemId, MenuNode, TrayEvent, TrayItem};
-use std::hash::Hash;
+use iced_layershell::{reexport::Anchor, settings::LayerShellSettings};
+use rustsni::TrayEvent;
 use std::sync::Arc;
-
-#[to_layer_message]
-#[derive(Debug, Clone)]
-pub enum Message {
-    CompositorMessage(CompositorEvent),
-    TrayMessage(TrayEvent),
-    TrayAdded(ItemId, TrayItem),
-    TrayPressed(ItemId),
-    OpenTrayWith(Vec<MenuNode>, ItemId),
-    MenuEntryPressed(i32),
-    CloseTray,
-    ToggleCollapse,
-    AnimationUpdate,
-    UnCollapse,
-    Collapse,
-    Refresh,
-}
-
-fn window_hover_subscription() -> Subscription<Message> {
-    event::listen_with(|event, _, _| match event {
-        Event::Mouse(mouse::Event::CursorEntered) => Some(Message::UnCollapse),
-        Event::Mouse(mouse::Event::CursorLeft) => Some(Message::Collapse),
-        _ => None,
-    })
-}
-
-/// Iced subscription for ipc with a wayland compositor
-fn compositor_subscription(_state: &AppState) -> Subscription<Message> {
-    Subscription::run(|| {
-        iced::stream::channel::<Message>(100, |mut output: mpsc::Sender<Message>| async move {
-            let (tx, rx) = smol::channel::unbounded::<CompositorEvent>();
-            smol::spawn(async move { compositor_bridge::start_event_stream(tx).await.unwrap() })
-                .detach();
-            loop {
-                let event = rx.recv().await;
-                match event {
-                    Ok(event) => {
-                        output.send(Message::CompositorMessage(event)).await.ok();
-                    }
-                    Err(e) => panic!("{}", e),
-                }
-            }
-        })
-    })
-}
-
-fn clock_subscription() -> Subscription<Message> {
-    Subscription::run(|| {
-        iced::stream::channel::<Message>(10, |mut output: mpsc::Sender<Message>| async move {
-            loop {
-                output.send(Message::Refresh).await.unwrap();
-                let now = chrono::Local::now();
-                let next_update = now.with_second(0).unwrap().with_nanosecond(0).unwrap()
-                    + chrono::Duration::minutes(1);
-                smol::Timer::after((next_update - now).to_std().unwrap()).await;
-            }
-        })
-    })
-}
-
-fn ipc_subscription() -> Subscription<Message> {
-    Subscription::run(|| iced::stream::channel(10, ipc::start_listener))
-}
-
-fn animation_subscription(state: &AppState) -> Subscription<Message> {
-    if state.collapsed.is_animating(state.now) || state.menu_open.is_animating(state.now) {
-        iced::window::frames().map(|_| Message::AnimationUpdate)
-    } else {
-        Subscription::none()
-    }
-}
-
-fn tray_subscription() -> Subscription<Message> {
-    Subscription::run(|| iced::stream::channel(10, tray_listiner))
-}
 
 /// Takes a vector of workspaces and an AppState and assigns it to the state, while also updating
 /// the focused workspaces and sorting them by idx
@@ -260,149 +181,6 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
     }
 }
 
-fn window_text(state: &AppState) -> Element<'_, Message> {
-    let window_text = if state.focused_window.is_some() {
-        &state.focused_window.as_ref().unwrap().title
-    } else {
-        &"".to_string()
-    };
-    let window_text = helper::truncate(window_text, 35);
-    text!("{}", window_text).into()
-}
-
-fn workspaces(state: &AppState) -> Row<'_, Message> {
-    Row::from_iter(state.workspaces.iter().map(|w| {
-        container(horizontal().height(20))
-            .style(|theme: &Theme| {
-                let palette = theme.extended_palette();
-                container::primary(theme)
-                    .background(if state.focused_workspaces.contains(&w.id) {
-                        palette.primary.base.color
-                    } else {
-                        palette.background.base.color
-                    })
-                    .rounded()
-            })
-            .into()
-    }))
-    .align_y(iced::alignment::Vertical::Center)
-    .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
-    .spacing(MARGINS)
-}
-
-fn box_content<'a>(icon: &String, text: &String) -> Element<'a, Message> {
-    column![
-        text!("{}", icon).center().size(48).width(Length::Fill),
-        vertical(),
-        text!("{}", text).center().size(24).width(Length::Fill)
-    ]
-    .width(Length::Fill)
-    .into()
-}
-
-fn data_box<'a>(icon: &String, text: &String) -> Element<'a, Message> {
-    container(box_content(icon, text))
-        .padding(iced::padding::all(MARGINS))
-        .style(|theme: &Theme| {
-            let palette = theme.extended_palette();
-            container::primary(theme)
-                .rounded()
-                .background(palette.primary.weak.color)
-        })
-        .into()
-}
-
-fn button_box<'a>(icon: &String, text: &String) -> Button<'a, Message> {
-    button(box_content(icon, text))
-        .padding(iced::padding::all(MARGINS))
-        .style(button_style)
-}
-
-struct TrayItemWrapper<'a>(pub &'a TrayItem);
-
-impl<'a> Hash for TrayItemWrapper<'a> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.id.to_string().hash(state)
-    }
-}
-
-fn tray_button<'a>(item: &'a TrayItem) -> Button<'a, Message> {
-    let image = iced::widget::lazy(TrayItemWrapper { 0: item }, |item| {
-        let item = item.0;
-        match get_tray_icon(item) {
-            Some(path) => Element::from(
-                iced::widget::Image::new(Handle::from_path(path))
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            ),
-            None => match item.best_icon_pixmap() {
-                Some(pixmap) => Element::from(
-                    iced::widget::Image::new(Handle::from_rgba(
-                        pixmap.width,
-                        pixmap.height,
-                        pixmap.data.clone(),
-                    ))
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-                ),
-                None => {
-                    println!("{}", item.icon_name);
-                    println!("{:?}", item.icon_search_paths());
-                    let icon = item.title.chars().nth(0).unwrap_or('⊟').to_uppercase();
-                    println!("{}", item.title);
-
-                    Element::from(button_box(&icon.to_string(), &item.title))
-                }
-            },
-        }
-    });
-    button(container(image).padding(iced::padding::all(MARGINS))).style(button_style)
-}
-
-fn button_style(
-    theme: &iced::Theme,
-    status: iced::widget::button::Status,
-) -> iced::widget::button::Style {
-    let palette = theme.extended_palette();
-    let mut p = button::primary(theme, status).with_background(match status {
-        button::Status::Hovered => palette.primary.weak.color,
-        button::Status::Pressed => palette.primary.base.color,
-        _ => palette.background.base.color,
-    });
-    p.border = iced::border::Border {
-        color: palette.primary.base.color,
-        width: 0.5,
-        radius: RADIUS.into(),
-    };
-    p.text_color = palette.background.base.text;
-    p
-}
-
-fn battery_indicators(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
-    let Ok(batteries) = state.battery.batteries() else {
-        return either::Left(std::iter::empty());
-    };
-    either::Right(batteries.flatten().map(|battery| {
-        data_box(
-            &"🔋".to_string(),
-            &format!(
-                "{:02.2}%",
-                battery.state_of_charge().get::<percent>().to_string()
-            ),
-        )
-    }))
-}
-
-fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
-    state.tray_icons.iter().map(|(_id, t)| {
-        tray_button(&t)
-            .on_press(Message::TrayPressed(t.id.clone()))
-            .height(Length::Fill)
-            .width(Length::Fill)
-            .into()
-    })
-}
-
 fn view(state: &AppState) -> Element<'_, Message> {
     const MAIN_WIDTH: u32 = WINDOW_WIDTH - MENU_WIDTH * 2 - MARGINS * 2;
     let main_style = {
@@ -447,14 +225,6 @@ fn view(state: &AppState) -> Element<'_, Message> {
                 container(
                     scrollable(
                         column(
-                            // std::iter::once(
-                            //     row![
-                            //         horizontal(),
-                            //         button(text!("x")).on_press(Message::CloseTray)
-                            //     ]
-                            //     .into(),
-                            // )
-                            // .chain(
                             state
                                 .menu_items
                                 .iter()
@@ -474,7 +244,6 @@ fn view(state: &AppState) -> Element<'_, Message> {
                                     }
                                 })
                                 .flatten(),
-                            // ),
                         )
                         .padding(iced::padding::vertical(MARGINS))
                         .spacing(MARGINS),

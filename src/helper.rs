@@ -1,7 +1,7 @@
 
 use iced::{Element, color, widget::container};
 
-use crate::app::Message;
+use crate::state::Message;
 
 // https://stackoverflow.com/questions/38461429/how-can-i-truncate-a-string-to-have-at-most-n-characters
 pub fn truncate(s: &str, max_chars: usize) -> String {

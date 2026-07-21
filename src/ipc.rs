@@ -1,14 +1,15 @@
 use std::{
     io::Write,
     os::unix::net::UnixStream,
-    path::{Path, PathBuf}, process,
+    path::{Path, PathBuf},
+    process,
 };
 
 use async_signal::{Signal, Signals};
 use iced::futures::{AsyncBufReadExt, SinkExt, StreamExt, channel::mpsc, io::BufReader};
 use smol::{fs, future, net::unix::UnixListener};
 
-use crate::{app::Message, consts::APP_NAME};
+use crate::{consts::APP_NAME, state::Message};
 
 fn get_sock_path() -> PathBuf {
     let path = std::env::var("XDG_RUNTIME_DIR").unwrap();
@@ -49,8 +50,9 @@ pub async fn start_listener(mut output: mpsc::Sender<Message>) {
                 }
             }
         },
-        signal.next()
-    ).await;
+        signal.next(),
+    )
+    .await;
     fs::remove_file(path).await.ok();
     process::exit(1);
 }

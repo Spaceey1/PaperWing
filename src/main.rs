@@ -7,6 +7,8 @@ mod ipc;
 mod state;
 mod theme;
 mod tray;
+mod subscriptions;
+mod elements;
 
 fn main() {
     match args().nth(1) {

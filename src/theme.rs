@@ -1,4 +1,4 @@
-use iced::theme::Base;
+use iced::{theme::Base, widget::button};
 
 use crate::{
     consts::{APP_NAME, RADIUS},
@@ -52,4 +52,23 @@ impl BackgoundContainer for iced::widget::container::Style {
         let palette = default_theme(state.mode).palette();
         iced::widget::container::Style::default().background(palette.background)
     }
+}
+
+pub fn button_style(
+    theme: &iced::Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    let palette = theme.extended_palette();
+    let mut p = button::primary(theme, status).with_background(match status {
+        button::Status::Hovered => palette.primary.weak.color,
+        button::Status::Pressed => palette.primary.base.color,
+        _ => palette.background.base.color,
+    });
+    p.border = iced::border::Border {
+        color: palette.primary.base.color,
+        width: 0.5,
+        radius: RADIUS.into(),
+    };
+    p.text_color = palette.background.base.text;
+    p
 }
