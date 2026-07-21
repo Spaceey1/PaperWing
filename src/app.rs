@@ -12,7 +12,6 @@ use battery::units::ratio::percent;
 use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use compositor_bridge::state::Workspace;
-use iced::widget::button::Catalog;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{Button, button, scrollable};
 use iced::{
