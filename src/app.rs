@@ -12,6 +12,7 @@ use battery::units::ratio::percent;
 use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use compositor_bridge::state::Workspace;
+use iced::widget::button::Catalog;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{Button, button, scrollable};
 use iced::{
@@ -275,7 +276,7 @@ fn workspaces(state: &AppState) -> Row<'_, Message> {
         container(horizontal().height(20))
             .style(|theme: &Theme| {
                 let palette = theme.extended_palette();
-                container::Style::default()
+                container::primary(theme)
                     .background(if state.focused_workspaces.contains(&w.id) {
                         palette.primary.base.color
                     } else {
@@ -305,7 +306,7 @@ fn data_box<'a>(icon: &String, text: &String) -> Element<'a, Message> {
         .padding(iced::padding::all(MARGINS))
         .style(|theme: &Theme| {
             let palette = theme.extended_palette();
-            container::Style::default()
+            container::primary(theme)
                 .rounded()
                 .background(palette.primary.weak.color)
         })
@@ -364,14 +365,17 @@ fn button_style(
     status: iced::widget::button::Status,
 ) -> iced::widget::button::Style {
     let palette = theme.extended_palette();
-    let mut p = button::Style::default()
-        .with_background(match status {
-            button::Status::Hovered => palette.primary.base.color,
-            button::Status::Pressed => palette.primary.strong.color,
-            _ => palette.primary.weak.color,
-        })
-        .rounded();
-    p.text_color = theme.palette().text;
+    let mut p = button::primary(theme, status).with_background(match status {
+        button::Status::Hovered => palette.primary.weak.color,
+        button::Status::Pressed => palette.primary.base.color,
+        _ => palette.background.base.color,
+    });
+    p.border = iced::border::Border {
+        color: palette.primary.base.color,
+        width: 0.5,
+        radius: RADIUS.into(),
+    };
+    p.text_color = palette.background.base.text;
     p
 }
 
@@ -414,22 +418,25 @@ fn view(state: &AppState) -> Element<'_, Message> {
             .interpolate(0., MENU_WIDTH as f32, state.now);
         let main = container(
             column![
-                row![
-                    window_text(state),
-                    horizontal(),
-                    Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
-                ],
-                iced::widget::scrollable(
-                    grid(battery_indicators(state).chain(tray_buttons(state)))
-                        .spacing(MARGINS)
-                        .columns(COLUMNS),
-                )
-                .height(Length::Fill),
+                column![
+                    row![
+                        window_text(state),
+                        horizontal(),
+                        Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
+                    ],
+                    vertical().height(MARGINS),
+                    iced::widget::scrollable(
+                        grid(battery_indicators(state).chain(tray_buttons(state)))
+                            .spacing(MARGINS)
+                            .columns(COLUMNS),
+                    )
+                    .height(Length::Fill)
+                ]
+                .padding(iced::padding::horizontal(MARGINS)),
                 container(workspaces(state))
             ]
             .spacing(MARGINS),
         )
-        .padding(iced::padding::horizontal(MARGINS))
         .width(MAIN_WIDTH)
         .style(move |_| main_style.clone());
         let menu_opening = state.menu_open.is_animating(state.now) || state.menu_open.value();
@@ -441,34 +448,36 @@ fn view(state: &AppState) -> Element<'_, Message> {
                 container(
                     scrollable(
                         column(
-                            std::iter::once(
-                                row![
-                                    horizontal(),
-                                    button(text!("x")).on_press(Message::CloseTray)
-                                ]
-                                .into(),
-                            )
-                            .chain(
-                                state
-                                    .menu_items
-                                    .iter()
-                                    .map(|item| {
-                                        if item.visible && item.label.len() > 0 {
-                                            Some(Element::from(
-                                                button(text!("{}", item.label))
-                                                    .style(|theme, status| {
-                                                        button::primary(theme, status).rounded()
-                                                    })
-                                                    .width(Length::Fill)
-                                                    .on_press(Message::MenuEntryPressed(item.id)),
-                                            ))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .flatten(),
-                            ),
+                            // std::iter::once(
+                            //     row![
+                            //         horizontal(),
+                            //         button(text!("x")).on_press(Message::CloseTray)
+                            //     ]
+                            //     .into(),
+                            // )
+                            // .chain(
+                            state
+                                .menu_items
+                                .iter()
+                                .map(|item| {
+                                    if item.visible && item.label.len() > 0 {
+                                        Some(Element::from(
+                                            button(
+                                                text!("{}", item.label)
+                                                    .wrapping(text::Wrapping::None),
+                                            )
+                                            .style(button_style)
+                                            .width(Length::Fill)
+                                            .on_press(Message::MenuEntryPressed(item.id)),
+                                        ))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .flatten(),
+                            // ),
                         )
+                        .padding(iced::padding::vertical(MARGINS))
                         .spacing(MARGINS),
                     )
                     .spacing(0)
@@ -478,8 +487,8 @@ fn view(state: &AppState) -> Element<'_, Message> {
                 .padding(iced::padding::horizontal(MARGINS))
                 .width(menu_progress)
                 .height(WINDOW_HEIGHT)
-                .style(|_| {
-                    iced::widget::container::Style::default()
+                .style(|theme| {
+                    iced::widget::container::primary(theme)
                         .backgound_container(state)
                         .rounded()
                 })
