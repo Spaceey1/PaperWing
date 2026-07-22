@@ -47,7 +47,8 @@ impl EventHandler for WindowFocusChanged {
                     title: "".to_string(),
                     ..Default::default()
                 })))
-                .await.unwrap()
+                .await
+                .unwrap()
         }
         match self.id {
             Some(id) => {
@@ -177,14 +178,23 @@ static REQUEST_SOCKET: LazyLock<UnixStream> = LazyLock::new(|| {
     UnixStream::connect(sock_path).expect("niri connection failed")
 });
 
-pub async fn send_request(msg: String) -> std::io::Result<String> {
+pub async fn send_request(msg: &String) -> std::io::Result<String> {
+    send_raw_request(format!("\"{}\"\n", msg)).await
+}
+
+async fn send_raw_request(msg: String) -> std::io::Result<String> {
     let mut sock = REQUEST_SOCKET.deref();
-    sock.write_all(&format!("\"{}\"\n", msg).into_bytes())?;
+    sock.write_all(&msg.into_bytes())?;
     sock.flush()?;
     let mut reader = BufReader::new(sock);
     let mut result = String::new();
     reader.read_line(&mut result)?;
     Ok(result)
+}
+
+pub async fn send_action(msg: &String) -> std::io::Result<String> {
+    let r = format!("{{\"Action\": {{{}}}}}\n", msg); // I'm simply too lazy to make a struct just for this
+    send_raw_request(r).await
 }
 
 pub async fn connect_event_stream(

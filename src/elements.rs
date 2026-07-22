@@ -4,8 +4,9 @@ use crate::theme::Rounded;
 use crate::theme::button_style;
 use crate::tray::get_tray_icon;
 use battery::units::ratio::percent;
+use iced::alignment;
 use iced::widget::image::Handle;
-use iced::widget::{Row, column, container, space::*, text, Button, button};
+use iced::widget::{Button, Row, button, column, container, space::*, text};
 use iced::{Element, Length, Theme};
 use rustsni::TrayItem;
 use std::hash::Hash;
@@ -24,18 +25,23 @@ pub fn window_text(state: &AppState) -> Element<'_, Message> {
 
 pub fn workspaces(state: &AppState) -> Row<'_, Message> {
     Row::from_iter(state.workspaces.iter().map(|w| {
-        container(horizontal().height(20))
-            .style(|theme: &Theme| {
-                let palette = theme.extended_palette();
-                container::primary(theme)
-                    .background(if state.focused_workspaces.contains(&w.id) {
-                        palette.primary.base.color
-                    } else {
-                        palette.background.base.color
-                    })
-                    .rounded()
-            })
-            .into()
+        let is_focused = state.focused_workspaces.contains(&w.id);
+        button(
+            text!("{}", w.name.clone().unwrap_or(w.idx.to_string()))
+                .align_x(alignment::Alignment::Center)
+                .height(20),
+        )
+        .style(move |theme: &Theme, status| {
+            if is_focused {
+                button::primary(theme, status)
+            } else {
+                button::background(theme, status)
+            }
+            .rounded()
+        })
+        .on_press(Message::FocusWorkspace(w.id))
+        .width(Length::Fill)
+        .into()
     }))
     .align_y(iced::alignment::Vertical::Center)
     .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
@@ -98,11 +104,7 @@ pub fn tray_button<'a>(item: &'a TrayItem) -> Button<'a, Message> {
                     .height(Length::Fill),
                 ),
                 None => {
-                    println!("{}", item.icon_name);
-                    println!("{:?}", item.icon_search_paths());
                     let icon = item.title.chars().nth(0).unwrap_or('⊟').to_uppercase();
-                    println!("{}", item.title);
-
                     Element::from(button_box(&icon.to_string(), &item.title))
                 }
             },

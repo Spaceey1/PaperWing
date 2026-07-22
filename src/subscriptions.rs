@@ -1,14 +1,14 @@
 use crate::ipc;
+use crate::state::AppState;
 use crate::state::Message;
 use crate::tray::tray_listiner;
-use crate::state::AppState;
 use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
+use iced::{Event, event, mouse};
 use iced::{
     Subscription,
     futures::{SinkExt, channel::mpsc},
 };
-use iced::{Event, event, mouse};
 
 pub fn window_hover_subscription() -> Subscription<Message> {
     event::listen_with(|event, _, _| match event {

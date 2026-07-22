@@ -1,6 +1,3 @@
-// TODO: Make all the ids have their own types that are aliases of their current types to avoid
-// mixing them up.
-
 use std::{
     collections::HashMap,
     error::Error,
@@ -10,9 +7,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub type WindowId = usize;
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Window {
-    pub id: usize,
+    pub id: WindowId,
     pub title: String,
     pub app_id: String,
     pub pid: u32,
@@ -32,9 +31,11 @@ pub struct Layout {
     pub window_offset_in_tile: Vec<f32>,
 }
 
+pub type WorkspaceId = usize;
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Workspace {
-    pub id: usize,
+    pub id: WorkspaceId,
     /// idx is the "number" of the workspace; for example when user "goes to workspace 1" they go to
     /// workspace with idx: 1. This is not necessarely the actual id of the workspace it and doesn't
     /// have to be unique.
@@ -47,7 +48,7 @@ pub struct Workspace {
     pub is_urgent: bool,
     pub is_active: bool,
     pub is_focused: bool,
-    pub active_window_id: Option<usize>,
+    pub active_window_id: Option<WindowId>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -97,9 +98,9 @@ impl fmt::Display for GetResourceError {
 
 impl std::error::Error for GetResourceError {}
 
-static WINDOWS: RwLock<LazyLock<HashMap<usize, Arc<Window>>>> =
+static WINDOWS: RwLock<LazyLock<HashMap<WindowId , Arc<Window>>>> =
     RwLock::new(LazyLock::new(HashMap::new));
-pub fn get_window(window_id: &usize) -> Result<Arc<Window>, GetResourceError> {
+pub fn get_window(window_id: &WindowId) -> Result<Arc<Window>, GetResourceError> {
     let windows = WINDOWS.read().map_err(|_| GetResourceError::Unknown)?;
     if windows.contains_key(window_id) {
         return Ok(windows[window_id].clone());
@@ -117,9 +118,9 @@ pub fn remove_window(id: &usize) -> Result<Option<Arc<Window>>, Box<dyn Error>> 
     Ok(windows.remove(id))
 }
 
-static WORKSPACES: RwLock<LazyLock<HashMap<usize, Arc<Workspace>>>> =
+static WORKSPACES: RwLock<LazyLock<HashMap<WorkspaceId, Arc<Workspace>>>> =
     RwLock::new(LazyLock::new(HashMap::new));
-pub fn get_workspace(workspace_id: &usize) -> Result<Arc<Workspace>, GetResourceError> {
+pub fn get_workspace(workspace_id: &WorkspaceId) -> Result<Arc<Workspace>, GetResourceError> {
     let workspaces = WORKSPACES.read().map_err(|_| GetResourceError::Unknown)?;
     if workspaces.contains_key(workspace_id) {
         return Ok(workspaces[workspace_id].clone());

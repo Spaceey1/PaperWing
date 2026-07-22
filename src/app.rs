@@ -93,7 +93,6 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 .collapsed
                 .interpolate::<f32>(WINDOW_HEIGHT as f32, UP_TRAVEL as f32, state.now)
                 .round() as u32;
-            // println!("{height}");
             Task::done(Message::SizeChange((WINDOW_WIDTH, height)))
         }
         Message::TrayMessage(msg) => {
@@ -175,6 +174,13 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         Message::CloseTray => {
             state.now = std::time::Instant::now();
             state.menu_open.go_mut(false, state.now);
+            Task::none()
+        }
+        Message::FocusWorkspace(id) => {
+            smol::spawn(async move {
+                let _ = compositor_bridge::go_to_workspace(&id).await;
+            })
+            .detach();
             Task::none()
         }
         _ => Task::none(),

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use compositor_bridge::{CompositorEvent, state::{Window, Workspace}};
+use compositor_bridge::{CompositorEvent, state::{Window, Workspace, WorkspaceId}};
 use iced::{Animation, theme::Mode};
 use iced_layershell::to_layer_message;
 use rustsni::{ItemId, MenuNode, TrayEvent, TrayItem};
@@ -56,4 +56,5 @@ pub enum Message {
     UnCollapse,
     Collapse,
     Refresh,
+    FocusWorkspace(WorkspaceId)
 }
