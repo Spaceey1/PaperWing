@@ -13,7 +13,7 @@ use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use compositor_bridge::state::Workspace;
 use iced::widget::scrollable::{Direction, Scrollbar};
-use iced::widget::{button, scrollable};
+use iced::widget::{button, scrollable, space, stack};
 use iced::{
     Element, Subscription, Task,
     widget::{
@@ -271,9 +271,16 @@ fn view(state: &AppState) -> Element<'_, Message> {
         }
         main_row.into()
     } else {
-        let main = container(column![vertical(), container(workspaces(state))])
-            .style(move |_| main_style)
-            .width(MAIN_WIDTH);
+        let activator: Element<Message> =
+            iced::widget::mouse_area(space().height(2).width(Length::Fill))
+                .on_enter(Message::UnCollapse)
+                .into();
+        let main = stack![
+            activator,
+            container(column![vertical(), workspaces(state),]).style(move |_| main_style)
+        ]
+        .width(MAIN_WIDTH)
+        .height(Length::Fill);
         row![horizontal(), main, horizontal()].into()
     }
 }

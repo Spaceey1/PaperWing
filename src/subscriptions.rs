@@ -12,7 +12,8 @@ use iced::{Event, event, mouse};
 
 pub fn window_hover_subscription() -> Subscription<Message> {
     event::listen_with(|event, _, _| match event {
-        Event::Mouse(mouse::Event::CursorEntered) => Some(Message::UnCollapse),
+        // UnCollapsing is handles in view, since for making this more usable i want that to happen
+        // only when the mouse is touching the very top of the bar, not just anywhere.
         Event::Mouse(mouse::Event::CursorLeft) => Some(Message::Collapse),
         _ => None,
     })
