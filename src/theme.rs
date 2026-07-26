@@ -20,7 +20,6 @@ pub fn theme(state: &AppState) -> iced::Theme {
     palette.background = iced::Color::TRANSPARENT;
     CONFIG.with_borrow(|config| {
         let Some(config) = config.as_ref() else {
-            println!("default");
             return iced::Theme::custom(name, palette);
         };
         set_if_some(
