@@ -13,7 +13,7 @@
       naersk,
     }:
     let
-      name = "bar";
+      name = "paperwing";
     in
     utils.lib.eachDefaultSystem (
       system:
