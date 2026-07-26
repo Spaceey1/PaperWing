@@ -1,29 +1,34 @@
+use crate::{
+    config::CONFIG, consts::{APP_NAME, RADIUS}, helper::set_if_some, state::AppState
+};
 use iced::{theme::Base, widget::button};
 
-use crate::{
-    consts::{APP_NAME, RADIUS},
-    state::AppState,
-};
-
 pub fn default_theme(mode: Option<iced::theme::Mode>) -> iced::Theme {
-    match mode {
-        Some(iced::theme::Mode::Light) => iced::theme::Theme::Light,
-        _ => {
-            let theme = iced::theme::Theme::Dark;
-            let mut pal = theme.palette();
-            pal.background = iced::color!(0x020202);
-            pal.primary = iced::color!(0xa64dff);
-            iced::Theme::custom(format!("Default - {}", theme.name()), pal)
-        }
-    }
+    native_theme_iced::from_system().map_or(
+        match mode {
+            Some(iced::theme::Mode::Light) => iced::theme::Theme::Light,
+            _ => iced::theme::Theme::Dark,
+        },
+        |r| r.0,
+    )
 }
 
 pub fn theme(state: &AppState) -> iced::Theme {
     let theme = default_theme(state.mode);
     let mut palette = theme.palette();
-    palette.background = iced::color!(0, 0, 0, 0.);
     let name = format!("{} - {}", theme.name(), APP_NAME);
-    return iced::Theme::custom(name, palette);
+    palette.background = iced::Color::TRANSPARENT;
+    CONFIG.with_borrow(|config| {
+        let Some(config) = config.as_ref() else {
+            println!("default");
+            return iced::Theme::custom(name, palette);
+        };
+        set_if_some(
+            &mut palette.primary,
+            config.primary.clone().map(|p| p.into()),
+        );
+        iced::Theme::custom(name, palette)
+    })
 }
 
 pub trait Rounded {
@@ -49,8 +54,16 @@ impl Rounded for iced::widget::button::Style {
 }
 impl BackgoundContainer for iced::widget::container::Style {
     fn backgound_container(self, state: &AppState) -> Self {
-        let palette = default_theme(state.mode).palette();
-        iced::widget::container::Style::default().background(palette.background)
+        let mut palette = default_theme(state.mode).palette();
+        CONFIG.with_borrow(|config| {
+            if let Some(config) = config.as_ref() {
+                set_if_some(
+                    &mut palette.background,
+                    config.background.clone().map(|b| b.into()),
+                );
+            }
+            iced::widget::container::Style::default().background(palette.background)
+        })
     }
 }
 

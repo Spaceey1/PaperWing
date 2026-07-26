@@ -3,15 +3,16 @@ use std::{
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
     process,
+    sync::OnceLock,
 };
 
-use async_signal::{Signal, Signals};
 use iced::futures::{AsyncBufReadExt, SinkExt, StreamExt, channel::mpsc, io::BufReader};
-use smol::{fs, future, net::unix::UnixListener};
+use smol::net::unix::UnixListener;
 
+pub static SOCKET_MADE: OnceLock<bool> = OnceLock::new();
 use crate::{consts::APP_NAME, state::Message};
 
-fn get_sock_path() -> PathBuf {
+pub fn get_sock_path() -> PathBuf {
     let path = std::env::var("XDG_RUNTIME_DIR").unwrap();
     PathBuf::from(path).join(APP_NAME)
 }
@@ -20,41 +21,44 @@ fn get_sock_path() -> PathBuf {
 pub async fn start_listener(mut output: mpsc::Sender<Message>) {
     let path = get_sock_path();
     if Path::new(&path).exists() {
-        panic!(
+        eprintln!(
             "App is already running. If that's not the case delete {}",
             path.to_str().or(Some("")).unwrap()
         );
+        process::exit(1);
     }
-    let mut signal = Signals::new([Signal::Term, Signal::Quit, Signal::Int]).unwrap();
-    let listener = UnixListener::bind(&path).unwrap();
-    future::race(
-        async {
-            loop {
-                let Some(Ok(msg)) = listener.incoming().next().await else {
-                    panic!("Ipc stream broken")
-                };
-                let mut reader = BufReader::new(msg);
-                let mut line: String = String::new();
-                if reader.read_line(&mut line).await.is_err() {
-                    eprint!("Error reading ipc event");
-                    continue;
-                };
-                let line = line.trim();
-                match line {
-                    "toggle-collapse" => {
-                        output.send(Message::ToggleCollapse).await.unwrap();
-                    }
-                    e => {
-                        eprint!("Received an invalid command: {}", e);
-                    }
-                }
+    let Ok(listener) = UnixListener::bind(&path) else {
+        eprintln!("Failed to create socket");
+        return;
+    };
+    SOCKET_MADE.set(true).unwrap();
+    loop {
+        let Some(Ok(msg)) = listener.incoming().next().await else {
+            eprintln!("Ipc stream broken");
+            break;
+        };
+        let mut reader = BufReader::new(msg);
+        let mut line: String = String::new();
+        if reader
+            .read_line(&mut line)
+            .await
+            .inspect_err(|e| {
+                eprint!("Error reading ipc event: {e}");
+            })
+            .is_err()
+        {
+            continue;
+        };
+        let line = line.trim();
+        match line {
+            "toggle-collapse" => {
+                output.send(Message::ToggleCollapse).await.unwrap();
             }
-        },
-        signal.next(),
-    )
-    .await;
-    fs::remove_file(path).await.ok();
-    process::exit(1);
+            e => {
+                eprint!("Received an invalid command: {}", e);
+            }
+        }
+    }
 }
 
 /// Sends a message to main instance of the app to be received in [`start_listener`]
