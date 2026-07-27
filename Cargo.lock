@@ -381,27 +381,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bar"
-version = "0.1.0"
-dependencies = [
- "async-signal",
- "battery",
- "chrono",
- "compositor_bridge",
- "directories",
- "either",
- "font-kit",
- "iced",
- "iced_layershell",
- "native-theme",
- "native-theme-iced",
- "rustsni",
- "serde",
- "serde_json",
- "smol",
-]
-
-[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3237,6 +3216,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b"
 dependencies = [
  "ttf-parser",
+]
+
+[[package]]
+name = "paperwing"
+version = "0.1.0"
+dependencies = [
+ "async-signal",
+ "battery",
+ "chrono",
+ "compositor_bridge",
+ "directories",
+ "either",
+ "font-kit",
+ "iced",
+ "iced_layershell",
+ "native-theme",
+ "native-theme-iced",
+ "rustsni",
+ "serde",
+ "serde_json",
+ "smol",
 ]
 
 [[package]]

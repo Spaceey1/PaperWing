@@ -1,11 +1,17 @@
 use crate::consts::MARGINS;
+use crate::consts::MENU_WIDTH;
+use crate::consts::WINDOW_HEIGHT;
 use crate::helper;
+use crate::theme::BackgroundContainer;
 use crate::theme::Rounded;
 use crate::theme::button_style;
 use crate::tray::get_tray_icon;
 use battery::units::ratio::percent;
 use iced::alignment;
 use iced::widget::image::Handle;
+use iced::widget::scrollable;
+use iced::widget::scrollable::Direction;
+use iced::widget::scrollable::Scrollbar;
 use iced::widget::{Button, Row, button, column, container, space::*, text};
 use iced::{Element, Length, Theme};
 use rustsni::TrayItem;
@@ -23,6 +29,48 @@ pub fn window_text(state: &AppState) -> Element<'_, Message> {
     text!("{}", window_text).into()
 }
 
+pub fn tray_menu(state: &AppState) -> Element<'_, Message> {
+    let menu_progress = state
+        .menu_open
+        .interpolate(0., MENU_WIDTH as f32, state.now);
+    container(
+        scrollable(
+            column(
+                state
+                    .menu_items
+                    .iter()
+                    .map(|item| {
+                        if item.visible && item.label.len() > 0 {
+                            Some(Element::from(
+                                button(text!("{}", item.label).wrapping(text::Wrapping::None))
+                                    .style(button_style)
+                                    .width(Length::Fill)
+                                    .on_press(Message::MenuEntryPressed(item.id)),
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten(),
+            )
+            .padding(iced::padding::vertical(MARGINS))
+            .spacing(MARGINS),
+        )
+        .spacing(0)
+        .direction(Direction::Vertical(Scrollbar::hidden()))
+        .width(Length::Fill),
+    )
+    .padding(iced::padding::horizontal(MARGINS))
+    .width(menu_progress)
+    .height(WINDOW_HEIGHT)
+    .style(|theme| {
+        container::primary(theme)
+            .background_container(theme)
+            .rounded()
+    })
+    .into()
+}
+
 pub fn workspaces(state: &AppState) -> Row<'_, Message> {
     Row::from_iter(state.workspaces.iter().map(|w| {
         let is_focused = state.focused_workspaces.contains(&w.id);
@@ -35,7 +83,9 @@ pub fn workspaces(state: &AppState) -> Row<'_, Message> {
             if is_focused {
                 button::primary(theme, status)
             } else {
-                button::background(theme, status)
+                let mut b = button::background(theme, status);
+                b.text_color = theme.palette().text;
+                b
             }
             .rounded()
         })

@@ -1,7 +1,15 @@
 use crate::{
-    config::CONFIG, consts::{APP_NAME, RADIUS}, helper::set_if_some, state::AppState
+    config::CONFIG,
+    consts::{APP_NAME, RADIUS},
+    helper::set_if_some,
+    state::AppState,
 };
-use iced::{theme::Base, widget::button};
+use iced::{
+    Color,
+    border::{self, bottom},
+    theme::Base,
+    widget::{button, container},
+};
 
 pub fn default_theme(mode: Option<iced::theme::Mode>) -> iced::Theme {
     native_theme_iced::from_system().map_or(
@@ -13,29 +21,69 @@ pub fn default_theme(mode: Option<iced::theme::Mode>) -> iced::Theme {
     )
 }
 
-pub fn theme(state: &AppState) -> iced::Theme {
+pub fn text_color(background_color: &iced::Color) -> iced::Color {
+    if background_color.relative_luminance() < 0.5 {
+        Color::WHITE
+    } else {
+        Color::BLACK
+    }
+}
+
+fn palette(state: &AppState) -> iced::theme::Palette {
     let theme = default_theme(state.mode);
     let mut palette = theme.palette();
-    let name = format!("{} - {}", theme.name(), APP_NAME);
-    palette.background = iced::Color::TRANSPARENT;
     CONFIG.with_borrow(|config| {
         let Some(config) = config.as_ref() else {
-            return iced::Theme::custom(name, palette);
+            return;
         };
         set_if_some(
             &mut palette.primary,
             config.primary.clone().map(|p| p.into()),
         );
-        iced::Theme::custom(name, palette)
-    })
+        palette.text = text_color(
+            config
+                .background
+                .as_ref()
+                .map(|c| c.into())
+                .unwrap_or(&palette.background),
+        )
+    });
+    return palette;
+}
+
+pub fn theme(state: &AppState) -> iced::Theme {
+    let mut palette = palette(state);
+    palette.background = iced::Color::TRANSPARENT;
+    let name = format!("{} - transparent", APP_NAME);
+    iced::Theme::custom(name, palette)
+}
+
+pub trait BackgroundContainer {
+    fn background_container(self, theme: &iced::Theme) -> Self;
+}
+
+impl BackgroundContainer for container::Style {
+    fn background_container(self, theme: &iced::Theme) -> Self {
+        CONFIG.with_borrow(|config| {
+            let default = default_theme(Some(theme.mode())).palette();
+            let palette = theme.extended_palette();
+            let primary = palette.primary.weak.color;
+            // let mut text = palette.background.base.text;
+            let bg = config
+                .as_ref()
+                .and_then(|config| config.background.as_ref())
+                .map(|bg| bg.to_owned().into())
+                .unwrap_or_else(|| default.background);
+
+            self.background(bg)
+                .border(border::color(primary).rounded(bottom(RADIUS)))
+                .color(text_color(&bg))
+        })
+    }
 }
 
 pub trait Rounded {
     fn rounded(self) -> Self;
-}
-
-pub trait BackgoundContainer {
-    fn backgound_container(self, state: &AppState) -> Self;
 }
 
 impl Rounded for iced::widget::container::Style {
@@ -51,36 +99,23 @@ impl Rounded for iced::widget::button::Style {
         self
     }
 }
-impl BackgoundContainer for iced::widget::container::Style {
-    fn backgound_container(self, state: &AppState) -> Self {
-        let mut palette = default_theme(state.mode).palette();
-        CONFIG.with_borrow(|config| {
-            if let Some(config) = config.as_ref() {
-                set_if_some(
-                    &mut palette.background,
-                    config.background.clone().map(|b| b.into()),
-                );
-            }
-            iced::widget::container::Style::default().background(palette.background)
-        })
-    }
-}
 
 pub fn button_style(
     theme: &iced::Theme,
     status: iced::widget::button::Status,
 ) -> iced::widget::button::Style {
     let palette = theme.extended_palette();
-    let mut p = button::primary(theme, status).with_background(match status {
+    let bg = match status {
         button::Status::Hovered => palette.primary.weak.color,
         button::Status::Pressed => palette.primary.base.color,
         _ => palette.background.base.color,
-    });
+    };
+    let mut p = button::primary(theme, status).with_background(bg);
     p.border = iced::border::Border {
         color: palette.primary.base.color,
         width: 0.5,
         radius: RADIUS.into(),
     };
-    p.text_color = palette.background.base.text;
+    p.text_color = text_color(&bg);
     p
 }

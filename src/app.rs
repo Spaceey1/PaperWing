@@ -1,10 +1,10 @@
 use crate::config::CONFIG;
-use crate::consts::{COLUMNS, MENU_WIDTH, RADIUS};
+use crate::consts::{COLUMNS, MENU_WIDTH};
 use crate::elements::*;
 use crate::ipc::{SOCKET_MADE, get_sock_path};
 use crate::state::Message;
 use crate::subscriptions::*;
-use crate::theme::{BackgoundContainer, Rounded, button_style};
+use crate::theme::BackgroundContainer;
 use crate::tray::get_tray_host;
 use crate::{
     consts::{APP_NAME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
@@ -16,8 +16,7 @@ use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use compositor_bridge::state::Workspace;
 use iced::futures::StreamExt;
-use iced::widget::scrollable::{Direction, Scrollbar};
-use iced::widget::{button, scrollable, space, stack};
+use iced::widget::{space, stack};
 use iced::{
     Element, Subscription, Task,
     widget::{
@@ -26,7 +25,7 @@ use iced::{
         text,
     },
 };
-use iced::{Length, border};
+use iced::Length;
 use iced_layershell::reexport::core::font;
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings};
 use rustsni::TrayEvent;
@@ -195,17 +194,9 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
 }
 
 fn view(state: &AppState) -> Element<'_, Message> {
-    const MAIN_WIDTH: u32 = WINDOW_WIDTH - MENU_WIDTH * 2 - MARGINS * 2;
-    let main_style = {
-        let mut s = container::Style::default().backgound_container(state);
-        s.border = s.border.rounded(border::bottom(RADIUS));
-        s
-    };
-    if !state.collapsed.value() {
+    const MAIN_WIDTH: u32 = WINDOW_WIDTH - MENU_WIDTH;
+    let main = if !state.collapsed.value() {
         let time = chrono::Local::now();
-        let menu_progress = state
-            .menu_open
-            .interpolate(0., MENU_WIDTH as f32, state.now);
         let main = container(
             column![
                 column![
@@ -228,61 +219,8 @@ fn view(state: &AppState) -> Element<'_, Message> {
             .spacing(MARGINS),
         )
         .width(MAIN_WIDTH)
-        .style(move |_| main_style.clone());
-        let menu_opening = state.menu_open.is_animating(state.now) || state.menu_open.value();
-        let mut main_row = row![
-            horizontal(),
-            main,
-            // TODO: clean up this mess
-            if menu_opening {
-                container(
-                    scrollable(
-                        column(
-                            state
-                                .menu_items
-                                .iter()
-                                .map(|item| {
-                                    if item.visible && item.label.len() > 0 {
-                                        Some(Element::from(
-                                            button(
-                                                text!("{}", item.label)
-                                                    .wrapping(text::Wrapping::None),
-                                            )
-                                            .style(button_style)
-                                            .width(Length::Fill)
-                                            .on_press(Message::MenuEntryPressed(item.id)),
-                                        ))
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .flatten(),
-                        )
-                        .padding(iced::padding::vertical(MARGINS))
-                        .spacing(MARGINS),
-                    )
-                    .spacing(0)
-                    .direction(Direction::Vertical(Scrollbar::hidden()))
-                    .width(Length::Fill),
-                )
-                .padding(iced::padding::horizontal(MARGINS))
-                .width(menu_progress)
-                .height(WINDOW_HEIGHT)
-                .style(|theme| {
-                    iced::widget::container::primary(theme)
-                        .backgound_container(state)
-                        .rounded()
-                })
-                .into()
-            } else {
-                Element::from(horizontal())
-            }
-        ]
-        .spacing(MARGINS);
-        if menu_opening {
-            main_row = main_row.push(horizontal());
-        }
-        main_row.into()
+        .style(|theme| container::primary(theme).background_container(theme));
+        Element::from(main)
     } else {
         let activator: Element<Message> =
             iced::widget::mouse_area(space().height(2).width(Length::Fill))
@@ -290,12 +228,19 @@ fn view(state: &AppState) -> Element<'_, Message> {
                 .into();
         let main = stack![
             activator,
-            container(column![vertical(), workspaces(state),]).style(move |_| main_style)
+            container(column![vertical(), workspaces(state),])
+                .style(|theme| container::primary(theme).background_container(theme))
         ]
         .width(MAIN_WIDTH)
         .height(Length::Fill);
-        row![horizontal(), main, horizontal()].into()
+        Element::from(main)
+    };
+    let mut main_row = row![horizontal(), main,];
+    let menu_open = state.menu_open.is_animating(state.now) || state.menu_open.value();
+    if menu_open {
+        main_row = main_row.push(tray_menu(state));
     }
+    main_row.push(horizontal()).into()
 }
 
 pub fn start_app() {
@@ -322,12 +267,15 @@ pub fn start_app() {
                 layer_settings: LayerShellSettings {
                     anchor: Anchor::Top,
                     layer: iced_layershell::reexport::Layer::Overlay,
-                    size: Some((WINDOW_WIDTH, UP_TRAVEL)),
-                    exclusive_zone: 4,
+                    // move up 1 pixel offscreen to hide the top border
+                    margin: (-1, 0, 0, 0),
+                    // expand by 1 pixel to compensate
+                    // for the size lost offscreen
+                    size: Some((WINDOW_WIDTH, UP_TRAVEL + 1)),
+                    exclusive_zone: 0,
                     keyboard_interactivity: iced_layershell::reexport::KeyboardInteractivity::None,
                     start_mode: iced_layershell::settings::StartMode::Active,
-                    margin: (0, 0, 0, 0),
-                    ..Default::default()
+                    events_transparent: false,
                 },
                 ..Default::default()
             })

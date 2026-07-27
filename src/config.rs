@@ -161,6 +161,12 @@ impl Into<iced::Color> for Color {
     }
 }
 
+impl<'a> Into<&'a iced::Color> for &'a Color {
+    fn into(self) -> &'a iced::Color {
+        &self.0
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Default)]
 pub struct Config {
     pub background: Option<Color>,
