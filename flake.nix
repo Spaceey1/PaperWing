@@ -99,7 +99,7 @@
             xdg.configFile."${name}/config.json".text = (
               builtins.toJSON (
                 {
-                  primary = config.lib.stylix.colors.base0D;
+                  primary = config.lib.stylix.colors.base07;
                   font = config.stylix.fonts.monospace.name;
                 }
                 // (
