@@ -72,7 +72,7 @@ pub fn tray_menu(state: &AppState) -> Element<'_, Message> {
 }
 
 pub fn workspaces(state: &AppState) -> Row<'_, Message> {
-    Row::from_iter(state.workspaces.iter().map(|w| {
+    Row::from_iter(state.workspaces.iter().filter(|w|w.active_window_id.is_some()||w.is_focused).map(|w| {
         let is_focused = state.focused_workspaces.contains(&w.id);
         button(
             text!("{}", w.name.clone().unwrap_or(w.idx.to_string()))

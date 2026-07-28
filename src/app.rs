@@ -266,7 +266,7 @@ pub fn start_app() {
             .settings(iced_layershell::settings::Settings {
                 layer_settings: LayerShellSettings {
                     anchor: Anchor::Top,
-                    layer: iced_layershell::reexport::Layer::Overlay,
+                    layer: iced_layershell::reexport::Layer::Top,
                     // move up 1 pixel offscreen to hide the top border
                     margin: (-1, 0, 0, 0),
                     // expand by 1 pixel to compensate
