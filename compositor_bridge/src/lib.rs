@@ -1,10 +1,10 @@
 // TODO - Handle errors returned by niri in the Ok result, not just io errors.
 mod compositor_event;
 mod niri;
+mod mango;
 pub mod state;
 use core::fmt;
 use std::{
-    env,
     error::Error,
     io::ErrorKind,
     sync::{Arc, LazyLock},
@@ -12,7 +12,7 @@ use std::{
 
 pub use compositor_event::CompositorEvent;
 
-use crate::state::{Workspace, WorkspaceId};
+use crate::{mango::Mango, niri::Niri, state::{Workspace, WorkspaceId}};
 
 #[derive(Debug)]
 pub enum HandlingError {
@@ -25,7 +25,7 @@ impl fmt::Display for HandlingError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             HandlingError::ConnectionError => {
-                write!(f, "Connection with niri failed while handling event")
+                write!(f, "Connection with compositor failed while handling event")
             }
             HandlingError::BadData => write!(f, "Event data was bad"),
             HandlingError::Unknown => write!(f, "Something went wrong"),
@@ -79,59 +79,12 @@ trait Compositor: Sync + Send {
     async fn go_to_workspace(&self, id: &WorkspaceId) -> Result<(), CompositorError>;
 }
 
-struct Niri;
-
-#[async_trait::async_trait]
-impl Compositor for Niri {
-    fn is_running(&self) -> bool {
-        env::var("NIRI_SOCKET").is_ok()
-    }
-    async fn start_event_stream(
-        &self,
-        callback: smol::channel::Sender<compositor_event::CompositorEvent>,
-    ) -> Result<(), Box<dyn Error>> {
-        niri::connect_event_stream(callback).await
-    }
-    async fn get_workspaces(&self) -> Result<Vec<Arc<Workspace>>, CompositorError> {
-        let response = io_err_to_comp(niri::send_request(&"Workspaces".into()).await)?;
-        let workspaces: Vec<Arc<Workspace>> = serde_json::from_str::<serde_json::Value>(&response)
-            .map_err(|e| {
-                eprintln!("JSON syntax error: {}", e);
-                CompositorError::Unknown
-            })
-            .and_then(|value| {
-                if let Some(ok_val) = value.get("Ok").and_then(|ok| ok.get("Workspaces")) {
-                    serde_json::from_value::<Vec<Workspace>>(ok_val.clone()).map_err(|e| {
-                        eprintln!("Failed to parse ok body: {}", e);
-                        CompositorError::Unknown
-                    })
-                } else {
-                    let err_detail = value.get("Err").unwrap_or(&value);
-                    eprintln!("API returned error: {}", err_detail);
-                    Err(CompositorError::Unknown)
-                }
-            })?
-            .into_iter()
-            .map(Arc::new)
-            .collect();
-        Ok(workspaces)
-    }
-    async fn go_to_workspace(&self, id: &WorkspaceId) -> Result<(), CompositorError> {
-        io_err_to_comp(
-            niri::send_action(&format!(
-                "\"FocusWorkspace\": {{\"reference\": {{\"Id\": {}}}}}",
-                id
-            ))
-            .await,
-        )?;
-        Ok(())
-    }
-}
 impl std::error::Error for HandlingError {}
 
 static COMPOSITOR: LazyLock<Option<Arc<dyn Compositor>>> = LazyLock::new(|| {
     let mut compositors = Vec::<Arc<dyn Compositor>>::new();
     compositors.push(Arc::new(Niri {}));
+    compositors.push(Arc::new(Mango {}));
     let Some(compositor) = compositors.iter().find(|c| c.is_running()) else {
         return None;
     };

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub type WindowId = usize;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(default)]
 pub struct Window {
     pub id: WindowId,
     pub title: String,
@@ -23,6 +24,7 @@ pub struct Window {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(default)]
 pub struct Layout {
     pub pos_in_scrolling_layout: Vec<f32>,
     pub tile_size: Vec<f32>,
@@ -34,6 +36,7 @@ pub struct Layout {
 pub type WorkspaceId = usize;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(default)]
 pub struct Workspace {
     pub id: WorkspaceId,
     /// idx is the "number" of the workspace; for example when user "goes to workspace 1" they go to
@@ -51,7 +54,8 @@ pub struct Workspace {
     pub active_window_id: Option<WindowId>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Output {
     name: String,
     make: String,
@@ -62,7 +66,8 @@ pub struct Output {
     logical: Logical,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Logical {
     /// Logical x position
     x: usize,
@@ -73,7 +78,8 @@ pub struct Logical {
     scale: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Mode {
     width: usize,
     height: usize,

@@ -1,6 +1,6 @@
-use crate::HandlingError;
 use crate::compositor_event::CompositorEvent;
 use crate::state::*;
+use crate::{Compositor, CompositorError, HandlingError, compositor_event, io_err_to_comp};
 use serde::{Deserialize, Serialize};
 use smol::channel::Sender;
 use std::ops::Deref;
@@ -12,6 +12,55 @@ use std::{
     io::{BufRead, BufReader, Write},
     sync::Arc,
 };
+
+pub struct Niri;
+
+#[async_trait::async_trait]
+impl Compositor for Niri {
+    fn is_running(&self) -> bool {
+        env::var("NIRI_SOCKET").is_ok()
+    }
+    async fn start_event_stream(
+        &self,
+        callback: smol::channel::Sender<compositor_event::CompositorEvent>,
+    ) -> Result<(), Box<dyn Error>> {
+        connect_event_stream(callback).await
+    }
+    async fn get_workspaces(&self) -> Result<Vec<Arc<Workspace>>, CompositorError> {
+        let response = io_err_to_comp(send_request(&"Workspaces".into()).await)?;
+        let workspaces: Vec<Arc<Workspace>> = serde_json::from_str::<serde_json::Value>(&response)
+            .map_err(|e| {
+                eprintln!("JSON syntax error: {}", e);
+                CompositorError::Unknown
+            })
+            .and_then(|value| {
+                if let Some(ok_val) = value.get("Ok").and_then(|ok| ok.get("Workspaces")) {
+                    serde_json::from_value::<Vec<Workspace>>(ok_val.clone()).map_err(|e| {
+                        eprintln!("Failed to parse ok body: {}", e);
+                        CompositorError::Unknown
+                    })
+                } else {
+                    let err_detail = value.get("Err").unwrap_or(&value);
+                    eprintln!("API returned error: {}", err_detail);
+                    Err(CompositorError::Unknown)
+                }
+            })?
+            .into_iter()
+            .map(Arc::new)
+            .collect();
+        Ok(workspaces)
+    }
+    async fn go_to_workspace(&self, id: &WorkspaceId) -> Result<(), CompositorError> {
+        io_err_to_comp(
+            send_action(&format!(
+                "\"FocusWorkspace\": {{\"reference\": {{\"Id\": {}}}}}",
+                id
+            ))
+            .await,
+        )?;
+        Ok(())
+    }
+}
 
 #[enum_dispatch::enum_dispatch]
 trait EventHandler {
@@ -29,7 +78,7 @@ impl EventHandler for WorkspaceActivated {
             return Ok(());
         };
         event_channel
-            .send(CompositorEvent::WorkspaceFocusChanged(self.id))
+            .send(CompositorEvent::WorkspaceFocusChanged())
             .await
             .map_err(|_| HandlingError::ConnectionError)
     }
@@ -135,18 +184,15 @@ pub struct WorkspacesChanged {
 impl EventHandler for WorkspacesChanged {
     async fn handle(self, event_channel: &Sender<CompositorEvent>) -> Result<(), HandlingError> {
         let workspaces: Vec<Arc<Workspace>> = self.workspaces.into_iter().map(Arc::new).collect();
-        let mut iter = workspaces.clone().into_iter(); // Cloning vec of arcs is fine
+        let iter = workspaces.clone().into_iter(); // Cloning vec of arcs is fine
 
         set_workspaces(iter.clone()).map_err(|_| HandlingError::Unknown)?;
         event_channel
             .send(CompositorEvent::WorkspacesChanged(workspaces))
             .await
             .map_err(|_| HandlingError::ConnectionError)?;
-        let Some(focused_workspace) = iter.find(|x| x.is_focused) else {
-            return Err(HandlingError::BadData);
-        };
         event_channel
-            .send(CompositorEvent::WorkspaceFocusChanged(focused_workspace.id))
+            .send(CompositorEvent::WorkspaceFocusChanged())
             .await
             .map_err(|_| HandlingError::ConnectionError)
     }

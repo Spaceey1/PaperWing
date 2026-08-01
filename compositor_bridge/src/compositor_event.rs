@@ -6,7 +6,7 @@ use crate::state::*;
 pub enum CompositorEvent {
     FocusedWindowChanged(Arc<Window>),
     WorkspacesChanged(Vec<Arc<Workspace>>),
-    WorkspaceFocusChanged(usize),
+    WorkspaceFocusChanged(),
 }
 impl fmt::Debug for CompositorEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
