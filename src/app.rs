@@ -15,6 +15,7 @@ use async_signal::{Signal, Signals};
 use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use compositor_bridge::state::Workspace;
+use iced::Length;
 use iced::futures::StreamExt;
 use iced::widget::{space, stack};
 use iced::{
@@ -25,11 +26,11 @@ use iced::{
         text,
     },
 };
-use iced::Length;
 use iced_layershell::reexport::core::font;
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings};
 use rustsni::TrayEvent;
 use smol::fs;
+use std::ops::Deref;
 use std::process;
 use std::sync::Arc;
 
@@ -251,6 +252,7 @@ pub fn start_app() {
         cleanup().await;
     })
     .detach();
+    let monitor = CONFIG.with_borrow(|c| c.as_ref().and_then(|c| c.display.clone()));
     let mut app =
         iced_layershell::application(AppState::default, || APP_NAME.to_string(), update, view)
             .subscription(|state| {
@@ -274,7 +276,11 @@ pub fn start_app() {
                     size: Some((WINDOW_WIDTH, UP_TRAVEL + 1)),
                     exclusive_zone: 0,
                     keyboard_interactivity: iced_layershell::reexport::KeyboardInteractivity::None,
-                    start_mode: iced_layershell::settings::StartMode::Active,
+                    start_mode: if monitor.is_some() {
+                        iced_layershell::settings::StartMode::TargetScreen(monitor.unwrap())
+                    } else {
+                        iced_layershell::settings::StartMode::Active
+                    },
                     events_transparent: false,
                 },
                 ..Default::default()

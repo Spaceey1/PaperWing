@@ -172,4 +172,5 @@ pub struct Config {
     pub background: Option<Color>,
     pub primary: Option<Color>,
     pub font: Option<String>,
+    pub display: Option<String>
 }

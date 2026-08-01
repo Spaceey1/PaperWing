@@ -66,20 +66,48 @@
           ...
         }:
         let
-          cfg = config.stylix.targets."${name}";
+          name = "paperwing";
+          cfgStylix = config.stylix.targets."${name}";
+          cfg = config.programs."${name}";
           hasStylix = ((options ? stylix) && config.stylix.enable);
-          useStylix = hasStylix && cfg.enable;
-          opacity = config.stylix.opacity;
+          useStylix = hasStylix && cfgStylix.enable;
           c = config.lib.stylix.colors;
           rgb = color: [
-            (lib.trivial.fromHexString c."${color}-rgb-r" / 255.)
-            (lib.trivial.fromHexString c."${color}-rgb-g" / 255.)
-            (lib.trivial.fromHexString c."${color}-rgb-b" / 255.)
+            (builtins.fromJSON c."${color}-dec-r")
+            (builtins.fromJSON c."${color}-dec-g")
+            (builtins.fromJSON c."${color}-dec-b")
           ];
         in
         {
           options = {
-            programs."${name}".enable = lib.mkEnableOption name;
+            programs."${name}" = {
+              enable = lib.mkEnableOption name;
+
+              primaryColor = lib.mkOption {
+                default = if useStylix && cfgStylix.colors.enable then rgb "base07" else null;
+                type = lib.types.nullOr (lib.types.listOf lib.types.float);
+              };
+
+              backgroundColor = lib.mkOption {
+                default = if useStylix && cfgStylix.colors.enable then rgb "base00" else null;
+                type = lib.types.nullOr (lib.types.listOf lib.types.float);
+              };
+
+              opacity = lib.mkOption {
+                default = if useStylix && cfgStylix.opacity.enable then config.stylix.opacity.desktop else null;
+                type = lib.types.nullOr lib.types.float;
+              };
+
+              font = lib.mkOption {
+                default = if useStylix then config.stylix.fonts.monospace.name else null;
+                type = lib.types.nullOr lib.types.str;
+              };
+
+              display = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+              };
+            };
 
             stylix.targets."${name}" = {
               enable = lib.mkOption {
@@ -94,26 +122,31 @@
             };
           };
 
-          config = lib.mkIf (config.programs.${name}.enable && useStylix) {
+          config = lib.mkIf cfg.enable {
             home.packages = [ self.packages.${pkgs.stdenv.hostPlatform.system}.default ];
             xdg.configFile."${name}/config.json".text = (
               builtins.toJSON (
-                {
-                  primary = config.lib.stylix.colors.base07;
-                  font = config.stylix.fonts.monospace.name;
-                }
+                (if cfg.primaryColor != null then { primary = cfg.primaryColor; } else { })
                 // (
-                  if cfg.colors.enable && cfg.opacity.enable then
-                    { background = rgb "base00" ++ [ opacity.desktop ]; }
-                  else if cfg.colors.enable then
-                    { background = rgb "base00"; }
+                  if cfg.font != null then
+                    {
+                      font = cfg.font;
+                    }
                   else
                     { }
                 )
+                // (
+                  if cfg.backgroundColor != null && cfg.opacity != null then
+                    { background = cfg.backgroundColor ++ [ cfg.opacity ]; }
+                  else if cfg.backgroundColor != null then
+                    { background = cfg.backgroundColor; }
+                  else
+                    { }
+                )
+                // (if cfg.display != null then { display = cfg.display; } else { })
               )
             );
           };
         };
-      homeModules."${name}" = self.homeModules.default;
     };
 }
