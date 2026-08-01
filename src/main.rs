@@ -25,7 +25,7 @@ fn main() {
     match args().nth(1) {
         None => {
             // smol needs at least 2 threads for iced_layershell to not deadlock :/
-            set_env_if_not_present("SMOL_THREADS", 2);
+            set_env_if_not_present("SMOL_THREADS", 8);
             app::start_app();
         }
         Some(msg) => ipc::send_message(msg),

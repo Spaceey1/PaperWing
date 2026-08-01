@@ -59,7 +59,7 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                     state.focused_window = Some(window);
                     Task::none()
                 }
-                CompositorEvent::WorkspaceFocusChanged(_) => {
+                CompositorEvent::WorkspaceFocusChanged() => {
                     // I don't get information which workspace got unfocused, so have to request full state of all workspaces again
                     Task::future(async { compositor_bridge::get_workspaces().await }).map(
                         |result| match result {
