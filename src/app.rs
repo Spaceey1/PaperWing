@@ -83,15 +83,20 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         Message::UnCollapse => {
             state.now = std::time::Instant::now();
             state.collapsed.go_mut(false, state.now);
-            Task::none()
+            Task::done(Message::LayerChange(
+                iced_layershell::reexport::Layer::Overlay,
+            ))
         }
         Message::Collapse => {
             state.now = std::time::Instant::now();
             state.collapsed.go_mut(true, state.now);
+            let after = Task::done(Message::LayerChange(
+                iced_layershell::reexport::Layer::Top,
+            ));
             if state.menu_open.value() {
-                Task::done(Message::CloseTray)
+                Task::batch([Task::done(Message::CloseTray), after])
             } else {
-                Task::none()
+                after
             }
         }
         Message::AnimationUpdate => {
