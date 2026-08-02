@@ -25,7 +25,7 @@ pub fn window_text(state: &AppState) -> Element<'_, Message> {
     } else {
         &"".to_string()
     };
-    let window_text = helper::truncate(window_text, 35);
+    let window_text = helper::truncate(window_text, 30);
     text!("{}", window_text).into()
 }
 
