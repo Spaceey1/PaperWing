@@ -105,7 +105,11 @@ async fn start_window_stream(
                     .as_array()?
                     .into_iter()
                     .flat_map(|v| -> Option<Window> {
-                        serde_json::from_value::<Window>(v.clone()).ok()
+                        // mango doesn't mark windows as not focused when they're not visible.
+                        let is_visible = v.get("is_visible")?.as_bool()?;
+                        let mut w = serde_json::from_value::<Window>(v.clone()).ok()?;
+                        w.is_focused = w.is_focused && is_visible;
+                        return Some(w);
                     })
                     .collect(),
             )
