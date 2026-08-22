@@ -5,15 +5,18 @@ use crate::helper;
 use crate::theme::BackgroundContainer;
 use crate::theme::Rounded;
 use crate::theme::button_style;
+use crate::theme::text_color;
 use crate::tray::get_tray_icon;
 use battery::units::ratio::percent;
 use iced::alignment;
+use iced::theme::Base;
 use iced::widget::image::Handle;
 use iced::widget::scrollable;
 use iced::widget::scrollable::Direction;
 use iced::widget::scrollable::Scrollbar;
 use iced::widget::{Button, Row, button, column, container, space::*, text};
 use iced::{Element, Length, Theme};
+use iced_layershell::reexport::core::Widget;
 use rustsni::TrayItem;
 use std::hash::Hash;
 
@@ -72,27 +75,33 @@ pub fn tray_menu(state: &AppState) -> Element<'_, Message> {
 }
 
 pub fn workspaces(state: &AppState) -> Row<'_, Message> {
-    Row::from_iter(state.workspaces.iter().filter(|w|w.active_window_id.is_some()||w.is_focused).map(|w| {
-        let is_focused = state.focused_workspaces.contains(&w.id);
-        button(
-            text!("{}", w.name.clone().unwrap_or(w.idx.to_string()))
-                .align_x(alignment::Alignment::Center)
-                .height(20),
-        )
-        .style(move |theme: &Theme, status| {
-            if is_focused {
-                button::primary(theme, status)
-            } else {
-                let mut b = button::background(theme, status);
-                b.text_color = theme.palette().text;
-                b
-            }
-            .rounded()
-        })
-        .on_press(Message::FocusWorkspace(w.id))
-        .width(Length::Fill)
-        .into()
-    }))
+    Row::from_iter(
+        state
+            .workspaces
+            .iter()
+            .filter(|w| w.active_window_id.is_some() || w.is_focused)
+            .map(|w| {
+                let is_focused = state.focused_workspaces.contains(&w.id);
+                button(
+                    text!("{}", w.name.clone().unwrap_or(w.idx.to_string()))
+                        .align_x(alignment::Alignment::Center)
+                        .height(20),
+                )
+                .style(move |theme: &Theme, status| {
+                    if is_focused {
+                        button::primary(theme, status)
+                    } else {
+                        let mut b = button::background(theme, status);
+                        b.text_color = theme.palette().text;
+                        b
+                    }
+                    .rounded()
+                })
+                .on_press(Message::FocusWorkspace(w.id))
+                .width(Length::Fill)
+                .into()
+            }),
+    )
     .align_y(iced::alignment::Vertical::Center)
     .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
     .spacing(MARGINS)
@@ -100,9 +109,16 @@ pub fn workspaces(state: &AppState) -> Row<'_, Message> {
 
 pub fn box_content<'a>(icon: &String, text: &String) -> Element<'a, Message> {
     column![
-        text!("{}", icon).center().size(48).width(Length::Fill),
+        text!("{}", icon).center().width(Length::Fill).size(24),
         vertical(),
-        text!("{}", text).center().size(24).width(Length::Fill)
+        text!("{}", text)
+            .center()
+            .width(Length::Fill)
+            .style(|theme| {
+                let mut style = text::primary(theme);
+                style.color = Some(text_color(&theme.palette().primary));
+                style
+            })
     ]
     .width(Length::Fill)
     .into()
