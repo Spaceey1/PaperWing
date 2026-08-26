@@ -30,7 +30,6 @@ use iced_layershell::reexport::core::font;
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings};
 use rustsni::TrayEvent;
 use smol::fs;
-use std::ops::Deref;
 use std::process;
 use std::sync::Arc;
 

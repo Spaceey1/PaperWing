@@ -9,14 +9,12 @@ use crate::theme::text_color;
 use crate::tray::get_tray_icon;
 use battery::units::ratio::percent;
 use iced::alignment;
-use iced::theme::Base;
 use iced::widget::image::Handle;
 use iced::widget::scrollable;
 use iced::widget::scrollable::Direction;
 use iced::widget::scrollable::Scrollbar;
 use iced::widget::{Button, Row, button, column, container, space::*, text};
 use iced::{Element, Length, Theme};
-use iced_layershell::reexport::core::Widget;
 use rustsni::TrayItem;
 use std::hash::Hash;
 
