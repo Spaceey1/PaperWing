@@ -72,7 +72,7 @@ impl BackgroundContainer for container::Style {
                 .unwrap_or_else(|| default.background);
 
             self.background(bg)
-                .border(border::color(primary).rounded(bottom(RADIUS)))
+                .border(border::color(primary).rounded(bottom(RADIUS)).width(1))
                 .color(text_color(&bg))
         })
     }
