@@ -1,3 +1,4 @@
+use crate::consts::COLUMNS;
 use crate::consts::MARGINS;
 use crate::consts::MENU_WIDTH;
 use crate::consts::WINDOW_HEIGHT;
@@ -8,6 +9,7 @@ use crate::theme::button_style;
 use crate::theme::text_color;
 use crate::tray::get_tray_icon;
 use battery::units::ratio::percent;
+use chrono::Timelike;
 use iced::alignment;
 use iced::widget::image::Handle;
 use iced::widget::scrollable;
@@ -21,8 +23,8 @@ use std::hash::Hash;
 use crate::state::{AppState, Message};
 
 pub fn window_text(state: &AppState) -> Element<'_, Message> {
-    let window_text = if state.focused_window.is_some() {
-        &state.focused_window.as_ref().unwrap().title
+    let window_text = if let Some(focused_window) = &state.focused_window {
+        &focused_window.title
     } else {
         &"".to_string()
     };
@@ -40,8 +42,8 @@ pub fn tray_menu(state: &AppState) -> Element<'_, Message> {
                 state
                     .menu_items
                     .iter()
-                    .map(|item| {
-                        if item.visible && item.label.len() > 0 {
+                    .filter_map(|item| {
+                        if item.visible && !item.label.is_empty() {
                             Some(Element::from(
                                 button(text!("{}", item.label).wrapping(text::Wrapping::None))
                                     .style(button_style)
@@ -51,8 +53,7 @@ pub fn tray_menu(state: &AppState) -> Element<'_, Message> {
                         } else {
                             None
                         }
-                    })
-                    .flatten(),
+                    }),
             )
             .padding(iced::padding::vertical(MARGINS))
             .spacing(MARGINS),
@@ -149,7 +150,7 @@ impl<'a> Hash for TrayItemWrapper<'a> {
 }
 
 pub fn tray_button<'a>(item: &'a TrayItem) -> Button<'a, Message> {
-    let image = iced::widget::lazy(TrayItemWrapper { 0: item }, |item| {
+    let image = iced::widget::lazy(TrayItemWrapper(item), |item| {
         let item = item.0;
         match get_tray_icon(item) {
             Some(path) => Element::from(
@@ -168,7 +169,7 @@ pub fn tray_button<'a>(item: &'a TrayItem) -> Button<'a, Message> {
                     .height(Length::Fill),
                 ),
                 None => {
-                    let icon = item.title.chars().nth(0).unwrap_or('⊟').to_uppercase();
+                    let icon = item.title.chars().next().unwrap_or('⊟').to_uppercase();
                     Element::from(button_box(&icon.to_string(), &item.title))
                 }
             },
@@ -193,11 +194,64 @@ pub fn battery_indicators(state: &AppState) -> impl Iterator<Item = Element<'_, 
 }
 
 pub fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
-    state.tray_icons.iter().map(|(_id, t)| {
-        tray_button(&t)
+    state.tray_icons.values().map(|t| {
+        tray_button(t)
             .on_press(Message::TrayPressed(t.id.clone()))
             .height(Length::Fill)
             .width(Length::Fill)
             .into()
     })
+}
+
+pub fn expanded_content(state: &AppState) -> Element<'_, Message> {
+    let time = chrono::Local::now();
+    column![
+        column![
+            iced::widget::row![
+                window_text(state),
+                horizontal(),
+                Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
+            ],
+            vertical().height(MARGINS),
+            iced::widget::scrollable(
+                iced::widget::grid(battery_indicators(state).chain(tray_buttons(state)))
+                    .spacing(MARGINS)
+                    .columns(COLUMNS),
+            )
+            .height(Length::Fill)
+        ]
+        .padding(iced::padding::horizontal(MARGINS)),
+        container(workspaces(state))
+    ]
+    .spacing(MARGINS)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+pub fn peek_content(state: &AppState) -> Element<'_, Message> {
+    let content = column![
+        container(window_text(state)).padding(iced::padding::horizontal(MARGINS)),
+        workspaces(state),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill);
+    iced::widget::mouse_area(content)
+        .on_enter(Message::UnCollapse)
+        .into()
+}
+
+pub fn collapsed_content(state: &AppState) -> Element<'_, Message> {
+    let activator: Element<Message> =
+        iced::widget::mouse_area(iced::widget::space().height(2).width(Length::Fill))
+            .on_enter(Message::UnCollapse)
+            .into();
+    iced::widget::stack![
+        activator,
+        container(column![vertical(), workspaces(state)])
+            .style(|theme| container::primary(theme).background_container(theme)),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }

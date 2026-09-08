@@ -2,7 +2,7 @@
 
 use crate::{consts::APP_NAME, helper::parse_hex_color};
 use directories::ProjectDirs;
-use serde::{Deserialize, Deserializer, Serialize, de, ser::Error};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::error::Category::{self};
 use std::{cell::RefCell, fmt::Display, fs::File, io::Write, path::PathBuf, sync::LazyLock};
 
@@ -31,9 +31,9 @@ static CONFIG_DIR: std::sync::LazyLock<ProjectDirs> =
     std::sync::LazyLock::new(|| ProjectDirs::from("", "", APP_NAME).unwrap());
 
 thread_local! {
-    pub static CONFIG: RefCell<LazyLock<Option<Config>>> = RefCell::new(LazyLock::new(|| {
+    pub static CONFIG: RefCell<LazyLock<Config>> = RefCell::new(LazyLock::new(|| {
         let config = load_config().inspect_err(|e| eprintln!("{e}"));
-        config.ok()
+        config.unwrap_or_else(|_|Config::default())
     }));
 }
 
@@ -61,7 +61,7 @@ fn load_config() -> Result<Config, ConfigRWError> {
             if config.as_ref().is_err_and(|e| *e == ConfigRWError::Io) {
                 return Err(ConfigRWError::Missing);
             }
-            return config;
+            config
         }
         Err(_) => Err(ConfigRWError::Missing),
     }
@@ -69,7 +69,7 @@ fn load_config() -> Result<Config, ConfigRWError> {
 
 pub fn refresh_config() -> Result<(), ConfigRWError> {
     CONFIG.with_borrow_mut(|config| -> Result<(), ConfigRWError> {
-        config.replace(load_config()?);
+        *config = load_config()?.into();
         Ok(())
     })
 }
@@ -77,18 +77,15 @@ pub fn refresh_config() -> Result<(), ConfigRWError> {
 pub fn save_config() -> serde_json::Result<()> {
     let config_path = get_config_path();
     if !std::fs::exists(&config_path).unwrap_or(false) {
-        std::fs::create_dir_all(&config_path.parent().unwrap()).ok();
+        std::fs::create_dir_all(config_path.parent().unwrap()).ok();
         // If parent directiories exist but the file itself doesn't, it'll be created later, so this
         // is fine
     };
     let mut config_file = File::create(config_path).unwrap();
     CONFIG.with_borrow(|config| {
-        let Some(ref config) = **config else {
-            return Err(serde_json::Error::custom("Config is missing"));
-        };
-        let r = serde_json::to_writer(&config_file, &config);
+        let r = serde_json::to_writer(&config_file, &**config);
         config_file.flush().unwrap();
-        return r;
+        r
     })
 }
 
@@ -105,13 +102,12 @@ impl<'de> Deserialize<'de> for Color {
         // Deserializing from a tuple r, g, b or r, g, b, a
         if let Some(arr) = value.as_array() {
             for x in arr {
-                if let Some(x) = x.as_f64() {
-                    if x > 1. || x < 0. {
+                if let Some(x) = x.as_f64()
+                    && (!(0. ..=1.).contains(&x)) {
                         return Err(de::Error::custom(
                             "invalid color format: color values must be between 0 and 1 inclusive",
                         ));
                     }
-                }
             }
             match arr.as_slice() {
                 [r, g, b] => {
@@ -155,15 +151,15 @@ impl Serialize for Color {
     }
 }
 
-impl Into<iced::Color> for Color {
-    fn into(self) -> iced::Color {
-        self.0
+impl From<Color> for iced::Color {
+    fn from(val: Color) -> Self {
+        val.0
     }
 }
 
-impl<'a> Into<&'a iced::Color> for &'a Color {
-    fn into(self) -> &'a iced::Color {
-        &self.0
+impl<'a> From<&'a Color> for &'a iced::Color {
+    fn from(val: &'a Color) -> Self {
+        &val.0
     }
 }
 
@@ -172,5 +168,6 @@ pub struct Config {
     pub background: Option<Color>,
     pub primary: Option<Color>,
     pub font: Option<String>,
-    pub display: Option<String>
+    pub display: Option<String>,
+    pub peek_timeout: Option<f32>,
 }

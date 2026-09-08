@@ -1,35 +1,31 @@
 use crate::config::CONFIG;
-use crate::consts::{COLUMNS, MENU_WIDTH};
-use crate::elements::*;
+use crate::consts::{DEFAULT_PEEK_TIMEOUT, MENU_WIDTH};
+use crate::elements::{self, *};
 use crate::ipc::{SOCKET_MADE, get_sock_path};
+use crate::state::BarState;
 use crate::state::Message;
-use crate::subscriptions::*;
 use crate::theme::BackgroundContainer;
 use crate::tray::get_tray_host;
 use crate::{
-    consts::{APP_NAME, MARGINS, UP_TRAVEL, WINDOW_HEIGHT, WINDOW_WIDTH},
+    consts::{APP_NAME, UP_TRAVEL, WINDOW_WIDTH},
     state::AppState,
     theme::{self},
 };
+use crate::{subscriptions::*, tray};
 use async_signal::{Signal, Signals};
-use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use compositor_bridge::state::Workspace;
 use iced::Length;
 use iced::futures::StreamExt;
-use iced::widget::{space, stack};
 use iced::{
-    Element, Subscription, Task,
-    widget::{
-        column, container, grid, row,
-        space::{horizontal, vertical},
-        text,
-    },
+    Element, Subscription, Task, alignment,
+    widget::{container, row, space::horizontal},
 };
 use iced_layershell::reexport::core::font;
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings};
 use rustsni::TrayEvent;
 use smol::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::process;
 use std::sync::Arc;
 
@@ -47,17 +43,65 @@ fn update_workspace_state(state: &mut AppState, mut workspaces: Vec<Arc<Workspac
         .collect();
 }
 
+/// Requests a transition of the bar to `target`. If the transition is actually a change,
+/// a single compositor resize event is emitted (either immediately or when the internal
+/// animation finishes, depending on `resize_now`), while the visual animation is driven
+/// internally by [`Message::AnimationUpdate`].
+fn request_bar_state(state: &mut AppState, target: BarState, resize_now: bool) -> Task<Message> {
+    let current = state.bar_state.value();
+    if current == target {
+        return Task::none();
+    }
+    state.now = std::time::Instant::now();
+    state.bar_state.go_mut(target, state.now);
+    if target == BarState::Collapsed && !resize_now {
+        state.resize_pending = true;
+    } else if resize_now {
+        return Task::done(Message::SizeChange((WINDOW_WIDTH, target.window_height())));
+    }
+    Task::none()
+}
+
+fn collapse(state: &mut AppState) -> Task<Message> {
+    state.peek_generation = state.peek_generation.wrapping_add(1);
+    let resize = request_bar_state(state, BarState::Collapsed, false);
+    let after = Task::done(Message::LayerChange(iced_layershell::reexport::Layer::Top));
+    if state.menu_open.value() {
+        Task::batch([resize, Task::done(Message::CloseTray), after])
+    } else {
+        Task::batch([resize, after])
+    }
+}
+
 fn update(state: &mut AppState, message: Message) -> Task<Message> {
     match message {
         Message::CompositorMessage(event) => {
             match event {
                 CompositorEvent::WorkspacesChanged(workspaces) => {
+                    let mut hasher = DefaultHasher::new();
+                    state.focused_workspaces.hash(&mut hasher);
+                    let hash1 = hasher.finish();
                     update_workspace_state(state, workspaces);
-                    Task::none()
+                    let mut hasher = DefaultHasher::new();
+                    state.focused_workspaces.hash(&mut hasher);
+                    let hash2 = hasher.finish();
+                    if hash1 != hash2 {
+                        Task::done(Message::TriggerPeek)
+                    } else {
+                        Task::none()
+                    }
                 }
                 CompositorEvent::FocusedWindowChanged(window) => {
+                    let Some(old) = state.focused_window.clone() else {
+                        state.focused_window = Some(window);
+                        return Task::none();
+                    };
                     state.focused_window = Some(window);
-                    Task::none()
+                    if old.id == state.focused_window.as_ref().unwrap().id {
+                        Task::none()
+                    } else {
+                        Task::done(Message::TriggerPeek)
+                    }
                 }
                 CompositorEvent::WorkspaceFocusChanged() => {
                     // I don't get information which workspace got unfocused, so have to request full state of all workspaces again
@@ -74,37 +118,68 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 }
             }
         }
-        Message::ToggleCollapse => Task::done(if state.collapsed.value() {
-            Message::UnCollapse
-        } else {
-            Message::Collapse
+        Message::ToggleCollapse => Task::done(match state.bar_state.value() {
+            BarState::Collapsed => Message::UnCollapse,
+            _ => Message::Collapse,
         }),
         Message::UnCollapse => {
-            state.now = std::time::Instant::now();
-            state.collapsed.go_mut(false, state.now);
-            Task::done(Message::LayerChange(
-                iced_layershell::reexport::Layer::Overlay,
-            ))
-        }
-        Message::Collapse => {
-            state.now = std::time::Instant::now();
-            state.collapsed.go_mut(true, state.now);
+            state.peek_generation = state.peek_generation.wrapping_add(1);
+            let resize = request_bar_state(state, BarState::Expanded, true);
             let after = Task::done(Message::LayerChange(
-                iced_layershell::reexport::Layer::Top,
+                iced_layershell::reexport::Layer::Overlay,
             ));
-            if state.menu_open.value() {
-                Task::batch([Task::done(Message::CloseTray), after])
+            Task::batch([resize, after])
+        }
+        Message::Collapse => collapse(state),
+        Message::TriggerPeek => {
+            state.peek_generation = state.peek_generation.wrapping_add(1);
+            if state.bar_state.value() == BarState::Expanded {
+                return Task::none();
+            }
+            let resize = if state.bar_state.value() == BarState::Collapsed {
+                state.resize_pending = false;
+                request_bar_state(state, BarState::Peek, true)
             } else {
-                after
+                Task::none()
+            };
+            let generation = state.peek_generation;
+            let timeout = CONFIG
+                .with_borrow(|config| config.peek_timeout.unwrap_or(DEFAULT_PEEK_TIMEOUT))
+                .round() as u64
+                * 1000;
+            let timer = Task::future(async move {
+                smol::Timer::after(std::time::Duration::from_millis(timeout)).await;
+                Message::PeekTimeout(generation)
+            });
+            Task::batch([resize, timer])
+        }
+        Message::PeekTimeout(id) => {
+            if id == state.peek_generation && state.bar_state.value() == BarState::Peek {
+                state.peek_generation = state.peek_generation.wrapping_add(1);
+                state.now = std::time::Instant::now();
+                state.bar_state.go_mut(BarState::Collapsed, state.now);
+                state.resize_pending = true;
+            }
+            Task::none()
+        }
+        Message::MouseLeave => {
+            if state.bar_state.value() != BarState::Collapsed {
+                collapse(state)
+            } else {
+                Task::none()
             }
         }
         Message::AnimationUpdate => {
             state.now = std::time::Instant::now();
-            let height = state
-                .collapsed
-                .interpolate::<f32>(WINDOW_HEIGHT as f32, UP_TRAVEL as f32, state.now)
-                .round() as u32;
-            Task::done(Message::SizeChange((WINDOW_WIDTH, height)))
+            if !state.bar_state.is_animating(state.now) && state.resize_pending {
+                state.resize_pending = false;
+                Task::done(Message::SizeChange((
+                    WINDOW_WIDTH,
+                    BarState::Collapsed.window_height(),
+                )))
+            } else {
+                Task::none()
+            }
         }
         Message::TrayMessage(msg) => {
             match msg {
@@ -200,46 +275,22 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
 
 fn view(state: &AppState) -> Element<'_, Message> {
     const MAIN_WIDTH: u32 = WINDOW_WIDTH - MENU_WIDTH;
-    let main = if !state.collapsed.value() {
-        let time = chrono::Local::now();
-        let main = container(
-            column![
-                column![
-                    row![
-                        window_text(state),
-                        horizontal(),
-                        Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
-                    ],
-                    vertical().height(MARGINS),
-                    iced::widget::scrollable(
-                        grid(battery_indicators(state).chain(tray_buttons(state)))
-                            .spacing(MARGINS)
-                            .columns(COLUMNS),
-                    )
-                    .height(Length::Fill)
-                ]
-                .padding(iced::padding::horizontal(MARGINS)),
-                container(workspaces(state))
-            ]
-            .spacing(MARGINS),
-        )
-        .width(MAIN_WIDTH)
-        .style(|theme| container::primary(theme).background_container(theme));
-        Element::from(main)
-    } else {
-        let activator: Element<Message> =
-            iced::widget::mouse_area(space().height(2).width(Length::Fill))
-                .on_enter(Message::UnCollapse)
-                .into();
-        let main = stack![
-            activator,
-            container(column![vertical(), workspaces(state),])
-                .style(|theme| container::primary(theme).background_container(theme))
-        ]
-        .width(MAIN_WIDTH)
-        .height(Length::Fill);
-        Element::from(main)
+    let target = state.bar_state.value();
+    let animated_height = state
+        .bar_state
+        .interpolate_with(BarState::visual_height, state.now)
+        .round() as u32;
+    let content = match target {
+        BarState::Collapsed => elements::collapsed_content(state),
+        BarState::Peek => elements::peek_content(state),
+        BarState::Expanded => elements::expanded_content(state),
     };
+    let main = container(container(content).width(Length::Fill).height(Length::Fill))
+        .width(MAIN_WIDTH)
+        .height(animated_height as f32)
+        .align_y(alignment::Vertical::Top)
+        .clip(true)
+        .style(|theme| container::primary(theme).background_container(theme));
     let mut main_row = row![horizontal(), main,];
     let menu_open = state.menu_open.is_animating(state.now) || state.menu_open.value();
     if menu_open {
@@ -256,7 +307,7 @@ pub fn start_app() {
         cleanup().await;
     })
     .detach();
-    let monitor = CONFIG.with_borrow(|c| c.as_ref().and_then(|c| c.display.clone()));
+    let monitor = CONFIG.with_borrow(|c| c.display.clone());
     let mut app =
         iced_layershell::application(AppState::default, || APP_NAME.to_string(), update, view)
             .subscription(|state| {
@@ -280,8 +331,8 @@ pub fn start_app() {
                     size: Some((WINDOW_WIDTH, UP_TRAVEL + 1)),
                     exclusive_zone: 0,
                     keyboard_interactivity: iced_layershell::reexport::KeyboardInteractivity::None,
-                    start_mode: if monitor.is_some() {
-                        iced_layershell::settings::StartMode::TargetScreen(monitor.unwrap())
+                    start_mode: if let Some(monitor) = monitor {
+                        iced_layershell::settings::StartMode::TargetScreen(monitor)
                     } else {
                         iced_layershell::settings::StartMode::Active
                     },
@@ -290,9 +341,7 @@ pub fn start_app() {
                 ..Default::default()
             })
             .theme(theme::theme);
-    if let Some(font_name) =
-        CONFIG.with_borrow(|config| config.as_ref().and_then(|config| config.font.clone()))
-    {
+    if let Some(font_name) = CONFIG.with_borrow(|config| config.font.clone()) {
         let family = font_kit::family_name::FamilyName::Title(font_name.clone());
         let properties = font_kit::properties::Properties::default();
         let loaded_font_data = font_kit::sources::fontconfig::FontconfigSource::new()
@@ -321,6 +370,12 @@ async fn cleanup() {
                 Make sure to delete {path_str} so the app can function properly on next relaunch.",
             )
         });
+    }
+    if let Some(host) = tray::HOST.get() {
+        let mut host = host.write().await;
+        if let Err(e) = host.shutdown() {
+            eprintln!("{e}");
+        };
     }
     process::exit(0);
 }

@@ -10,7 +10,7 @@ use smol::lock::RwLock;
 
 use crate::state::Message;
 
-static HOST: OnceLock<RwLock<TrayHost>> = OnceLock::new();
+pub static HOST: OnceLock<RwLock<TrayHost>> = OnceLock::new();
 
 pub fn get_tray_host() -> rustsni::Result<&'static RwLock<TrayHost>> {
     if let Some(lock) = HOST.get() {
@@ -61,7 +61,7 @@ pub fn get_tray_icon(item: &TrayItem) -> Option<PathBuf> {
                 continue;
             };
             let file_stem = file_stem.to_string();
-            if file_stem.to_string() == item.icon_name {
+            if file_stem == item.icon_name {
                 return Some(file_path);
             }
         }

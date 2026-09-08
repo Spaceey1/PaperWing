@@ -1,6 +1,8 @@
 use crate::package_name;
 pub const APP_NAME: &str = package_name!();
 pub const UP_TRAVEL: u32 = 15;
+pub const PEEK_HEIGHT: u32 = 68;
+pub const DEFAULT_PEEK_TIMEOUT: f32 = 3.;
 pub const WINDOW_WIDTH: u32 = 550;
 pub const WINDOW_HEIGHT: u32 = 300;
 pub const MENU_WIDTH: u32 = 150;

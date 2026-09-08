@@ -50,6 +50,7 @@
               rustc
               rustfmt
               pre-commit
+              clippy
             ]);
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;

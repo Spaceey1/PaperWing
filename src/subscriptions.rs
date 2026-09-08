@@ -12,9 +12,9 @@ use iced::{
 
 pub fn window_hover_subscription() -> Subscription<Message> {
     event::listen_with(|event, _, _| match event {
-        // UnCollapsing is handles in view, since for making this more usable i want that to happen
-        // only when the mouse is touching the very top of the bar, not just anywhere.
-        Event::Mouse(mouse::Event::CursorLeft) => Some(Message::Collapse),
+        // Uncollapsing is handled in view (only when the mouse touches the top of the bar),
+        // while leaving the bar collapses it again.
+        Event::Mouse(mouse::Event::CursorLeft) => Some(Message::MouseLeave),
         _ => None,
     })
 }
@@ -58,7 +58,7 @@ pub fn ipc_subscription() -> Subscription<Message> {
 }
 
 pub fn animation_subscription(state: &AppState) -> Subscription<Message> {
-    if state.collapsed.is_animating(state.now) || state.menu_open.is_animating(state.now) {
+    if state.bar_state.is_animating(state.now) || state.menu_open.is_animating(state.now) {
         iced::window::frames().map(|_| Message::AnimationUpdate)
     } else {
         Subscription::none()

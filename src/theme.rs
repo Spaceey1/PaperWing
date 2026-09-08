@@ -33,9 +33,6 @@ fn palette(state: &AppState) -> iced::theme::Palette {
     let theme = default_theme(state.mode);
     let mut palette = theme.palette();
     CONFIG.with_borrow(|config| {
-        let Some(config) = config.as_ref() else {
-            return;
-        };
         set_if_some(
             &mut palette.primary,
             config.primary.clone().map(|p| p.into()),
@@ -48,7 +45,7 @@ fn palette(state: &AppState) -> iced::theme::Palette {
                 .unwrap_or(&palette.background),
         )
     });
-    return palette;
+    palette
 }
 
 pub fn theme(state: &AppState) -> iced::Theme {
@@ -68,10 +65,9 @@ impl BackgroundContainer for container::Style {
             let default = default_theme(Some(theme.mode())).palette();
             let palette = theme.extended_palette();
             let primary = palette.primary.weak.color;
-            // let mut text = palette.background.base.text;
             let bg = config
+                .background
                 .as_ref()
-                .and_then(|config| config.background.as_ref())
                 .map(|bg| bg.to_owned().into())
                 .unwrap_or_else(|| default.background);
 

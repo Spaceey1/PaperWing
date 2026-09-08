@@ -23,7 +23,7 @@ pub async fn start_listener(mut output: mpsc::Sender<Message>) {
     if Path::new(&path).exists() {
         eprintln!(
             "App is already running. If that's not the case delete {}",
-            path.to_str().or(Some("")).unwrap()
+            path.to_str().unwrap_or("")
         );
         process::exit(1);
     }
@@ -72,5 +72,5 @@ pub fn send_message(mut msg: String) {
         .to_string();
     let path = get_sock_path();
     let mut stream = UnixStream::connect(path).unwrap();
-    stream.write_all(&msg.as_bytes()).unwrap();
+    stream.write_all(msg.as_bytes()).unwrap();
 }
