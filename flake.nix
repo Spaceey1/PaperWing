@@ -39,7 +39,7 @@
             wrapProgram $out/bin/${name}\
               --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath buildInputs}"
           '';
-          meta.mainProgram = "$out/bin/${name}";
+          meta.mainProgram = name;
         };
 
         devShells.default = pkgs.mkShell {
