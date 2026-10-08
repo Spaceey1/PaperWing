@@ -97,7 +97,7 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                         return Task::none();
                     };
                     state.focused_window = Some(window);
-                    if old.id == state.focused_window.as_ref().unwrap().id {
+                    if Some(old.id) == state.focused_window.as_ref().map(|f| f.id) {
                         Task::none()
                     } else {
                         Task::done(Message::TriggerPeek)
@@ -111,7 +111,8 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                                 CompositorEvent::WorkspacesChanged(workspaces),
                             ),
                             Err(e) => {
-                                panic!("{}", e);
+                                eprintln!("Failed to get workspaces: {e}");
+                                Message::Refresh
                             }
                         },
                     )
