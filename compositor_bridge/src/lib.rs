@@ -2,6 +2,7 @@
 mod compositor_event;
 mod niri;
 mod mango;
+mod hyprland;
 pub mod state;
 use core::fmt;
 use std::{
@@ -12,7 +13,7 @@ use std::{
 
 pub use compositor_event::CompositorEvent;
 
-use crate::{mango::Mango, niri::Niri, state::{Workspace, WorkspaceId}};
+use crate::{mango::Mango, niri::Niri, hyprland::Hyprland, state::{Workspace, WorkspaceId}};
 
 #[derive(Debug)]
 pub enum HandlingError {
@@ -85,6 +86,7 @@ static COMPOSITOR: LazyLock<Option<Arc<dyn Compositor>>> = LazyLock::new(|| {
     let mut compositors = Vec::<Arc<dyn Compositor>>::new();
     compositors.push(Arc::new(Niri {}));
     compositors.push(Arc::new(Mango {}));
+    compositors.push(Arc::new(Hyprland {}));
     let Some(compositor) = compositors.iter().find(|c| c.is_running()) else {
         return None;
     };

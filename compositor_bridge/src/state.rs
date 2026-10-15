@@ -12,12 +12,16 @@ pub type WindowId = usize;
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(default)]
 pub struct Window {
+    #[serde(alias = "address", deserialize_with = "deserialize_id")]
     pub id: WindowId,
     pub title: String,
+    #[serde(alias = "class")]
     pub app_id: String,
     pub pid: u32,
+    #[serde(alias = "workspace", deserialize_with = "deserialize_workspace_id")]
     pub workspace_id: usize,
     pub is_focused: bool,
+    #[serde(alias = "floating")]
     pub is_floating: bool,
     pub is_urgent: bool,
     pub layout: Layout,
@@ -47,44 +51,171 @@ pub struct Workspace {
     pub name: Option<String>,
     /// The physical output; a monitor, display, screen, vr headset, or whatever the compositor deems suitable
     /// to show windows on
+    #[serde(alias = "monitor")]
     pub output: String,
     pub is_urgent: bool,
     pub is_active: bool,
     pub is_focused: bool,
+    #[serde(alias = "lastwindow", deserialize_with = "deserialize_optional_id")]
     pub active_window_id: Option<WindowId>,
+}
+
+fn deserialize_id<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct IdVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for IdVisitor {
+        type Value = usize;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("an integer or hexadecimal address")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            usize::try_from(value).map_err(E::custom)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            usize::try_from(value).map_err(E::custom)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            usize::from_str_radix(value.trim_start_matches("0x"), 16).map_err(E::custom)
+        }
+    }
+
+    deserializer.deserialize_any(IdVisitor)
+}
+
+fn deserialize_optional_id<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct OptionalIdVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for OptionalIdVisitor {
+        type Value = Option<usize>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("an optional integer or hexadecimal address")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            usize::try_from(value).map(Some).map_err(E::custom)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if value.is_empty() || value == "0x0" {
+                Ok(None)
+            } else {
+                usize::from_str_radix(value.trim_start_matches("0x"), 16)
+                    .map(Some)
+                    .map_err(E::custom)
+            }
+        }
+    }
+
+    deserializer.deserialize_any(OptionalIdVisitor)
+}
+
+fn deserialize_workspace_id<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct WorkspaceIdVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for WorkspaceIdVisitor {
+        type Value = usize;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a workspace id or an object containing one")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            usize::try_from(value).map_err(E::custom)
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut id = None;
+            while let Some(key) = map.next_key::<String>()? {
+                if key == "id" {
+                    id = Some(map.next_value()?);
+                } else {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+            id.ok_or_else(|| serde::de::Error::missing_field("id"))
+        }
+    }
+
+    deserializer.deserialize_any(WorkspaceIdVisitor)
 }
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Output {
-    name: String,
-    make: String,
-    modes: Vec<Mode>,
-    current_mode: usize,
-    vrr_supported: bool,
-    vrr_enabled: bool,
-    logical: Logical,
+    pub name: String,
+    pub make: String,
+    pub modes: Vec<Mode>,
+    pub current_mode: usize,
+    pub vrr_supported: bool,
+    pub vrr_enabled: bool,
+    pub logical: Logical,
+    pub focused: bool,
+    #[serde(rename = "activeWorkspace")]
+    pub active_workspace: Workspace,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Logical {
     /// Logical x position
-    x: usize,
+    pub x: usize,
     /// Logical y position
-    y: usize,
-    width: usize,
-    height: usize,
-    scale: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
+    pub scale: usize,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Mode {
-    width: usize,
-    height: usize,
-    refresh_rate: usize,
-    is_preferred: bool,
+    pub width: usize,
+    pub height: usize,
+    pub refresh_rate: usize,
+    pub is_preferred: bool,
 }
 
 #[derive(Debug)]
