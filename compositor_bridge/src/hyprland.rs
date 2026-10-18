@@ -93,7 +93,10 @@ impl Compositor for Hyprland {
     }
 
     async fn go_to_workspace(&self, id: &WorkspaceId) -> Result<(), CompositorError> {
-        let _ = request(&format!("/dispatch workspace id:{id}")).await?;
+        let _ = request(&format!(
+            "j/eval hl.dispatch(hl.dsp.focus({{ workspace = \"{id}\" }}))"
+        ))
+        .await?;
         Ok(())
     }
 }
