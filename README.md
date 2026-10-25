@@ -41,7 +41,7 @@ If you want stylix integration set `programs.paperwing.enable = true` in home ma
 
 Remember to pass in inputs or the PaperWing flake as params to your modules.
 
-If you don't feel like changing your configuration you can also try the game out with just
+If you don't feel like changing your configuration you can also try it out with just
 ```
 nix run github:Spaceey1/PaperWing
 ```
