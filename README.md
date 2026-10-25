@@ -11,7 +11,11 @@ build with `cargo build --release`
 
 ### Support
 
-Right now only niri and mango are supported, more may or may not come in the future.
+Paperwing supports the following:
+- Niri
+- MangoWM
+- Hyprland
+More may be added in the future
 
 ### For NixOS/Home manager
 Add the flake as an input
