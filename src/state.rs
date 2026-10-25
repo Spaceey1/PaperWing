@@ -54,6 +54,7 @@ pub struct AppState {
     pub tray_icons: HashMap<ItemId, TrayItem>,
     pub resize_pending: bool,
     pub peek_generation: u64,
+    pub persistent_peek: bool,
 }
 
 impl Default for AppState {
@@ -76,6 +77,7 @@ impl Default for AppState {
             battery: battery::Manager::new().unwrap(),
             resize_pending: false,
             peek_generation: 0,
+            persistent_peek: false,
         }
     }
 }
@@ -96,7 +98,8 @@ pub enum Message {
     AnimationUpdate,
     UnCollapse,
     Collapse,
-    TriggerPeek,
+    Peek,
+    TimedPeek,
     PeekTimeout(u64),
     MouseLeave,
     Refresh,

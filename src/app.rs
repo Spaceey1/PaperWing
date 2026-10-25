@@ -64,6 +64,7 @@ fn request_bar_state(state: &mut AppState, target: BarState, resize_now: bool) -
 
 fn collapse(state: &mut AppState) -> Task<Message> {
     state.peek_generation = state.peek_generation.wrapping_add(1);
+    state.persistent_peek = false;
     let resize = request_bar_state(state, BarState::Collapsed, false);
     let after = Task::done(Message::LayerChange(iced_layershell::reexport::Layer::Top));
     if state.menu_open.value() {
@@ -71,6 +72,33 @@ fn collapse(state: &mut AppState) -> Task<Message> {
     } else {
         Task::batch([resize, after])
     }
+}
+
+fn peek(state: &mut AppState, timed: bool) -> Task<Message> {
+    if state.bar_state.value() == BarState::Expanded || state.persistent_peek {
+        return Task::none();
+    }
+    state.persistent_peek = !timed;
+    state.peek_generation = state.peek_generation.wrapping_add(1);
+    let resize = if state.bar_state.value() == BarState::Collapsed {
+        state.resize_pending = false;
+        request_bar_state(state, BarState::Peek, true)
+    } else {
+        Task::none()
+    };
+    if !timed {
+        return resize;
+    }
+    let generation = state.peek_generation;
+    let timeout = CONFIG
+        .with_borrow(|config| config.peek_timeout.unwrap_or(DEFAULT_PEEK_TIMEOUT))
+        .round() as u64
+        * 1000;
+    let timer = Task::future(async move {
+        smol::Timer::after(std::time::Duration::from_millis(timeout)).await;
+        Message::PeekTimeout(generation)
+    });
+    Task::batch([resize, timer])
 }
 
 fn update(state: &mut AppState, message: Message) -> Task<Message> {
@@ -86,7 +114,7 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                     state.focused_workspaces.hash(&mut hasher);
                     let hash2 = hasher.finish();
                     if hash1 != hash2 {
-                        Task::done(Message::TriggerPeek)
+                        Task::done(Message::TimedPeek)
                     } else {
                         Task::none()
                     }
@@ -100,7 +128,7 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                     if Some(old.id) == state.focused_window.as_ref().map(|f| f.id) {
                         Task::none()
                     } else {
-                        Task::done(Message::TriggerPeek)
+                        Task::done(Message::TimedPeek)
                     }
                 }
                 CompositorEvent::WorkspaceFocusChanged() => {
@@ -120,11 +148,12 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             }
         }
         Message::ToggleCollapse => Task::done(match state.bar_state.value() {
-            BarState::Collapsed => Message::UnCollapse,
-            _ => Message::Collapse,
+            BarState::Expanded => Message::Collapse,
+            _ => Message::UnCollapse,
         }),
         Message::UnCollapse => {
             state.peek_generation = state.peek_generation.wrapping_add(1);
+            state.persistent_peek = false;
             let resize = request_bar_state(state, BarState::Expanded, true);
             let after = Task::done(Message::LayerChange(
                 iced_layershell::reexport::Layer::Overlay,
@@ -132,30 +161,13 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             Task::batch([resize, after])
         }
         Message::Collapse => collapse(state),
-        Message::TriggerPeek => {
-            state.peek_generation = state.peek_generation.wrapping_add(1);
-            if state.bar_state.value() == BarState::Expanded {
-                return Task::none();
-            }
-            let resize = if state.bar_state.value() == BarState::Collapsed {
-                state.resize_pending = false;
-                request_bar_state(state, BarState::Peek, true)
-            } else {
-                Task::none()
-            };
-            let generation = state.peek_generation;
-            let timeout = CONFIG
-                .with_borrow(|config| config.peek_timeout.unwrap_or(DEFAULT_PEEK_TIMEOUT))
-                .round() as u64
-                * 1000;
-            let timer = Task::future(async move {
-                smol::Timer::after(std::time::Duration::from_millis(timeout)).await;
-                Message::PeekTimeout(generation)
-            });
-            Task::batch([resize, timer])
-        }
+        Message::Peek => peek(state, false),
+        Message::TimedPeek => peek(state, true),
         Message::PeekTimeout(id) => {
-            if id == state.peek_generation && state.bar_state.value() == BarState::Peek {
+            if id == state.peek_generation
+                && state.bar_state.value() == BarState::Peek
+                && !state.persistent_peek
+            {
                 state.peek_generation = state.peek_generation.wrapping_add(1);
                 state.now = std::time::Instant::now();
                 state.bar_state.go_mut(BarState::Collapsed, state.now);

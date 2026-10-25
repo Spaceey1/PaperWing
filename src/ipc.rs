@@ -54,6 +54,12 @@ pub async fn start_listener(mut output: mpsc::Sender<Message>) {
             "toggle-collapse" => {
                 output.send(Message::ToggleCollapse).await.unwrap();
             }
+            "peek" => {
+                output.send(Message::Peek).await.unwrap();
+            }
+            "hide" => {
+                output.send(Message::Collapse).await.unwrap();
+            }
             e => {
                 eprint!("Received an invalid command: {}", e);
             }
