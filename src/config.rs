@@ -169,5 +169,6 @@ pub struct Config {
     pub primary: Option<Color>,
     pub font: Option<String>,
     pub display: Option<String>,
+    pub peek_on_focus: Option<bool>,
     pub peek_timeout: Option<f32>,
 }

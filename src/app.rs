@@ -125,6 +125,10 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                         return Task::none();
                     };
                     state.focused_window = Some(window);
+                    let do_peek = CONFIG.with_borrow(|config| config.peek_on_focus);
+                    if do_peek.is_some_and(|x| !x) {
+                        return Task::none();
+                    }
                     if Some(old.id) == state.focused_window.as_ref().map(|f| f.id) {
                         Task::none()
                     } else {

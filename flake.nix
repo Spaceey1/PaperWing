@@ -109,6 +109,10 @@
                 type = lib.types.nullOr lib.types.str;
                 default = null;
               };
+              peek_on_focus = lib.mkOption {
+                type = lib.types.nullOr lib.types.bool;
+                default = null;
+              };
             };
 
             stylix.targets."${name}" = {
@@ -145,7 +149,10 @@
                   else
                     { }
                 )
-                // (if cfg.display != null then { display = cfg.display; } else { })
+                // {
+                  display = cfg.display;
+                  peek_on_focus = cfg.peek_on_focus;
+                }
               )
             );
           };
