@@ -1,7 +1,7 @@
 use crate::ipc;
 use crate::state::AppState;
 use crate::state::Message;
-use crate::tray::tray_listiner;
+use crate::tray::tray_listener;
 use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use iced::{Event, event, mouse};
@@ -66,5 +66,5 @@ pub fn animation_subscription(state: &AppState) -> Subscription<Message> {
 }
 
 pub fn tray_subscription() -> Subscription<Message> {
-    Subscription::run(|| iced::stream::channel(10, tray_listiner))
+    Subscription::run(|| iced::stream::channel(10, tray_listener))
 }

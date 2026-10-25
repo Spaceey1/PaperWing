@@ -23,11 +23,11 @@ use iced::{
 };
 use iced_layershell::reexport::core::font;
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings};
-use rustsni::TrayEvent;
 use smol::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::process;
 use std::sync::Arc;
+use tray_server::TrayEvent;
 
 /// Takes a vector of workspaces and an AppState and assigns it to the state, while also updating
 /// the focused workspaces and sorting them by idx
@@ -199,27 +199,16 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 TrayEvent::ItemAdded(id) | TrayEvent::ItemChanged(id) => {
                     let id2 = id.clone();
                     return Task::future(async move {
-                        rustsni::Result::Ok(
-                            get_tray_host()?
-                                .read()
-                                .await
-                                .items()
-                                .get(&id2)
-                                .unwrap()
-                                .clone(),
-                        )
+                        let host = get_tray_host().await?;
+                        let item = host
+                            .read()
+                            .await
+                            .item(&id2)
+                            .ok_or_else(|| tray_server::Error::ItemNotFound(id2.clone()))?;
+                        tray_server::Result::Ok(item)
                     })
                     .map(move |item| match item {
-                        Ok(mut item) => {
-                            // iced takes rgba but rustsni gives me argb, so rotating every 4
-                            // chunks 1 right converts it to the iced format
-                            for pixmap in item.icon_pixmaps.iter_mut() {
-                                for c in pixmap.data.chunks_mut(4) {
-                                    c.rotate_right(1);
-                                }
-                            }
-                            Message::TrayAdded(id.clone(), item)
-                        }
+                        Ok(item) => Message::TrayAdded(id.clone(), item),
                         Err(_) => Message::Refresh,
                     });
                 }
@@ -227,7 +216,6 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                     state.tray_icons.remove(&id);
                 }
                 TrayEvent::MenuActivationRequested(_) | TrayEvent::MenuChanged(_) => {}
-                TrayEvent::HostShutdown => panic!("Tray got shut down? Dont call shutdown."),
             };
             Task::none()
         }
@@ -241,7 +229,9 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             }
             let id2 = id.clone();
             Task::future(async move {
-                rustsni::Result::Ok(get_tray_host()?.write().await.get_menu(&id2, 0).unwrap())
+                let host = get_tray_host().await?;
+                let items = host.read().await.get_menu(&id2, 0).await?;
+                tray_server::Result::Ok(items)
             })
             .map(move |items| match items {
                 Ok(items) => Message::OpenTrayWith(items, id.clone()),
@@ -261,11 +251,10 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 return Task::done(Message::CloseTray);
             };
             smol::spawn(async move {
-                let Ok(menu) = get_tray_host() else {
+                let Ok(host) = get_tray_host().await else {
                     return;
                 };
-                let mut menu = menu.write().await;
-                let _ = menu.menu_click(&menu_id, id);
+                let _ = host.read().await.menu_click(&menu_id, id).await;
             })
             .detach();
             Task::done(Message::CloseTray)
@@ -385,8 +374,8 @@ async fn cleanup() {
         });
     }
     if let Some(host) = tray::HOST.get() {
-        let mut host = host.write().await;
-        if let Err(e) = host.shutdown() {
+        let host = host.read().await;
+        if let Err(e) = host.shutdown().await {
             eprintln!("{e}");
         };
     }

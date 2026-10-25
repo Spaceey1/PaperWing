@@ -16,9 +16,9 @@ use iced::widget::scrollable;
 use iced::widget::scrollable::Direction;
 use iced::widget::scrollable::Scrollbar;
 use iced::widget::{Button, Row, button, column, container, space::*, text};
-use iced::{Element, Length, Theme};
-use rustsni::TrayItem;
+use iced::{ContentFit, Element, Length, Theme};
 use std::hash::Hash;
+use tray_server::TrayItem;
 
 use crate::state::{AppState, Message};
 
@@ -38,23 +38,18 @@ pub fn tray_menu(state: &AppState) -> Element<'_, Message> {
         .interpolate(0., MENU_WIDTH as f32, state.now);
     container(
         scrollable(
-            column(
-                state
-                    .menu_items
-                    .iter()
-                    .filter_map(|item| {
-                        if item.visible && !item.label.is_empty() {
-                            Some(Element::from(
-                                button(text!("{}", item.label).wrapping(text::Wrapping::None))
-                                    .style(button_style)
-                                    .width(Length::Fill)
-                                    .on_press(Message::MenuEntryPressed(item.id)),
-                            ))
-                        } else {
-                            None
-                        }
-                    }),
-            )
+            column(state.menu_items.iter().filter_map(|item| {
+                if item.visible && !item.label.is_empty() {
+                    Some(Element::from(
+                        button(text!("{}", item.label).wrapping(text::Wrapping::None))
+                            .style(button_style)
+                            .width(Length::Fill)
+                            .on_press(Message::MenuEntryPressed(item.id)),
+                    ))
+                } else {
+                    None
+                }
+            }))
             .padding(iced::padding::vertical(MARGINS))
             .spacing(MARGINS),
         )
@@ -141,6 +136,8 @@ pub fn button_box<'a>(icon: &String, text: &String) -> Button<'a, Message> {
         .style(button_style)
 }
 
+const TRAY_ICON_SIZE: u32 = 32;
+
 struct TrayItemWrapper<'a>(pub &'a TrayItem);
 
 impl<'a> Hash for TrayItemWrapper<'a> {
@@ -152,30 +149,44 @@ impl<'a> Hash for TrayItemWrapper<'a> {
 pub fn tray_button<'a>(item: &'a TrayItem) -> Button<'a, Message> {
     let image = iced::widget::lazy(TrayItemWrapper(item), |item| {
         let item = item.0;
-        match get_tray_icon(item) {
-            Some(path) => Element::from(
+        let image = match get_tray_icon(item) {
+            Some(path) => Some(Element::from(
                 iced::widget::Image::new(Handle::from_path(path))
+                    .content_fit(ContentFit::Contain)
                     .width(Length::Fill)
                     .height(Length::Fill),
-            ),
-            None => match item.best_icon_pixmap() {
-                Some(pixmap) => Element::from(
+            )),
+            None => item.best_icon_pixmap().map(|pixmap| {
+                Element::from(
                     iced::widget::Image::new(Handle::from_rgba(
                         pixmap.width,
                         pixmap.height,
                         pixmap.data.clone(),
                     ))
+                    .content_fit(ContentFit::Contain)
                     .width(Length::Fill)
                     .height(Length::Fill),
-                ),
-                None => {
-                    let icon = item.title.chars().next().unwrap_or('⊟').to_uppercase();
-                    Element::from(button_box(&icon.to_string(), &item.title))
-                }
-            },
+                )
+            }),
+        };
+        match image {
+            Some(image) => container(container(image).center(TRAY_ICON_SIZE).clip(true))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into(),
+            None => {
+                let icon = item.title.chars().next().unwrap_or('^').to_uppercase();
+                Element::from(button_box(&icon.to_string(), &item.title))
+            }
         }
     });
-    button(container(image).padding(iced::padding::all(MARGINS))).style(button_style)
+    button(
+        container(image)
+            .padding(iced::padding::all(MARGINS))
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .style(button_style)
 }
 
 pub fn battery_indicators(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {

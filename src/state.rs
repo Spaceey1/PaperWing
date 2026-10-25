@@ -6,7 +6,7 @@ use compositor_bridge::{
 };
 use iced::{Animation, theme::Mode};
 use iced_layershell::to_layer_message;
-use rustsni::{ItemId, MenuNode, TrayEvent, TrayItem};
+use tray_server::{ItemId, MenuNode, TrayEvent, TrayItem};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BarState {

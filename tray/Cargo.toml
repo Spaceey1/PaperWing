@@ -1,0 +1,13 @@
+[package]
+name = "tray"
+version = "0.1.0"
+edition = "2024"
+description = "Async StatusNotifierItem watcher and host for PaperWing"
+license = "MIT"
+
+[dependencies]
+async-broadcast = "0.7"
+futures-util = "0.3"
+serde = "1"
+thiserror = "2"
+zbus = "5.18"
