@@ -15,6 +15,7 @@ Paperwing supports the following:
 - Niri
 - MangoWM
 - Hyprland
+
 More may be added in the future
 
 ### For NixOS/Home manager
