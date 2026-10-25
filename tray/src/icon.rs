@@ -21,8 +21,7 @@ impl IconPixmap {
 
         let mut data = raw[..expected].to_vec();
         for pixel in data.chunks_exact_mut(4) {
-            let [a, r, g, b] = [pixel[0], pixel[1], pixel[2], pixel[3]];
-            pixel.copy_from_slice(&[r, g, b, a]);
+            pixel.rotate_right(1);
         }
 
         Some(Self {
