@@ -41,10 +41,16 @@ pub fn tray_menu(state: &AppState) -> Element<'_, Message> {
             column(state.menu_items.iter().filter_map(|item| {
                 if item.visible && !item.label.is_empty() {
                     Some(Element::from(
-                        button(text!("{}", item.label).wrapping(text::Wrapping::None))
-                            .style(button_style)
-                            .width(Length::Fill)
-                            .on_press(Message::MenuEntryPressed(item.id)),
+                        button(
+                            text!("{}", item.label)
+                                .width(Length::Fill)
+                                .align_x(alignment::Horizontal::Left)
+                                .wrapping(text::Wrapping::WordOrGlyph),
+                        )
+                        .padding([5, 8])
+                        .style(button_style)
+                        .width(Length::Fill)
+                        .on_press(Message::MenuEntryPressed(item.id)),
                     ))
                 } else {
                     None

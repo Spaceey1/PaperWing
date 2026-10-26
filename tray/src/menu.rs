@@ -83,7 +83,7 @@ fn parse_node(value: &Value<'_>) -> Option<MenuNode> {
 
     Some(MenuNode {
         id: *id,
-        label: string(&props, "label"),
+        label: strip_gtk_mnemonics(&string(&props, "label")),
         enabled: bool_prop(&props, "enabled").unwrap_or(true),
         visible: bool_prop(&props, "visible").unwrap_or(true),
         icon_name: string(&props, "icon-name"),
@@ -123,6 +123,24 @@ fn string(props: &HashMap<String, PropValue>, key: &str) -> String {
         Some(PropValue::Str(value)) => value.clone(),
         _ => String::new(),
     }
+}
+
+/// GTK labels mark mnemonics with a single underscore. A doubled
+/// underscore represents a literal underscore and must be preserved.
+fn strip_gtk_mnemonics(label: &str) -> String {
+    let mut chars = label.chars().peekable();
+    let mut stripped = String::with_capacity(label.len());
+
+    while let Some(ch) = chars.next() {
+        if ch == '_' && chars.peek() == Some(&'_') {
+            chars.next();
+            stripped.push('_');
+        } else if ch != '_' {
+            stripped.push(ch);
+        }
+    }
+
+    stripped
 }
 
 fn bool_prop(props: &HashMap<String, PropValue>, key: &str) -> Option<bool> {
@@ -181,5 +199,13 @@ mod tests {
         assert!(!node.visible);
         assert!(node.is_submenu);
         assert_eq!(node.toggle_state, -1);
+    }
+
+    #[test]
+    fn strips_mnemonic_markers() {
+        assert_eq!(strip_gtk_mnemonics("_Open"), "Open");
+        assert_eq!(strip_gtk_mnemonics("Save _As"), "Save As");
+        assert_eq!(strip_gtk_mnemonics("Save __ As"), "Save _ As");
+        assert_eq!(strip_gtk_mnemonics("No underscores"), "No underscores");
     }
 }
