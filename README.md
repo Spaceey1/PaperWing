@@ -1,3 +1,6 @@
+![PaperWing demo](demo.webp)
+
+
 ### Building
 
 Dependencies are:
