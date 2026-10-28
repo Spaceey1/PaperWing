@@ -106,10 +106,14 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         Message::CompositorMessage(event) => {
             match event {
                 CompositorEvent::WorkspacesChanged(workspaces) => {
+                    update_workspace_state(state, workspaces);
+                    let do_peek = CONFIG.with_borrow(|config| config.peek_on_focus);
+                    if do_peek.is_some_and(|x| !x) {
+                        return Task::none();
+                    }
                     let mut hasher = DefaultHasher::new();
                     state.focused_workspaces.hash(&mut hasher);
                     let hash1 = hasher.finish();
-                    update_workspace_state(state, workspaces);
                     let mut hasher = DefaultHasher::new();
                     state.focused_workspaces.hash(&mut hasher);
                     let hash2 = hasher.finish();
