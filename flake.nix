@@ -51,7 +51,6 @@
                 cargo
                 rustc
                 rustfmt
-                pre-commit
                 clippy
               ]);
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
