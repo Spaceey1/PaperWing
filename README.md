@@ -32,16 +32,19 @@ paperwing = {
 Then add it as a NixOS package in your packages list.
 ```nix
 environment.systemPackages = [
-  inputs.paperwing.packages.x86_64-linux.paperwing
+  inputs.paperwing.packages.${pkgs.stdenv.hostPlatform.system}.default
 ];
 ```
 Or in home manager
 ```nix
 home.packages = [
-  inputs.paperwing.packages.x86_64-linux.paperwing
+  inputs.paperwing.packages.${pkgs.stdenv.hostPlatform.system}.default
 ];
 ```
-If you want stylix integration set `programs.paperwing.enable = true` in home manager.
+If you want stylix integration, import the home manager module and set `programs.paperwing.enable = true`:
+```nix
+imports = [ inputs.paperwing.homeModules.default ];
+```
 
 Remember to pass in inputs or the PaperWing flake as params to your modules.
 

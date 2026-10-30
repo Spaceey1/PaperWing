@@ -1,64 +1,69 @@
 {
   inputs = {
     naersk.url = "github:nix-community/naersk/master";
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    utils.url = "github:numtide/flake-utils";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
   outputs =
     {
       self,
       nixpkgs,
-      utils,
       naersk,
     }:
     let
       name = "paperwing";
-    in
-    utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-        naersk-lib = pkgs.callPackage naersk { };
-        nativeBuildInputs = with pkgs; [
-          pkg-config
-          makeBinaryWrapper
-        ];
-        buildInputs = with pkgs; [
-          fontconfig
-          libxkbcommon
-          wayland
-          vulkan-loader
-        ];
-      in
-      {
-        packages.default = naersk-lib.buildPackage {
-          src = ./.;
-          inherit nativeBuildInputs buildInputs;
-          postInstall = ''
-            wrapProgram $out/bin/${name}\
-              --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath buildInputs}"
-          '';
-          meta.mainProgram = name;
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+      perSystem =
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          naersk-lib = pkgs.callPackage naersk { };
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+            makeBinaryWrapper
+          ];
+          buildInputs = with pkgs; [
+            fontconfig
+            libxkbcommon
+            wayland
+            vulkan-loader
+          ];
+        in
+        {
+          packages.default = naersk-lib.buildPackage {
+            src = ./.;
+            inherit nativeBuildInputs buildInputs;
+            postInstall = ''
+              wrapProgram $out/bin/${name}\
+                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath buildInputs}"
+            '';
+            meta.mainProgram = name;
+          };
+
+          devShells.default = pkgs.mkShell {
+            inherit nativeBuildInputs;
+            buildInputs =
+              buildInputs
+              ++ (with pkgs; [
+                cargo
+                rustc
+                rustfmt
+                clippy
+              ]);
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
+            RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
+          };
         };
 
-        devShells.default = pkgs.mkShell {
-          inherit nativeBuildInputs;
-          buildInputs =
-            buildInputs
-            ++ (with pkgs; [
-              cargo
-              rustc
-              rustfmt
-              pre-commit
-              clippy
-            ]);
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
-          RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
-        };
-      }
-    )
-    // {
+      all = nixpkgs.lib.genAttrs systems perSystem;
+    in
+    {
+      packages = builtins.mapAttrs (_: v: v.packages) all;
+      devShells = builtins.mapAttrs (_: v: v.devShells) all;
+
       homeModules.default =
         {
           config,
