@@ -1,7 +1,7 @@
 {
   inputs = {
     naersk.url = "github:nix-community/naersk/master";
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
   };
 
