@@ -9,3 +9,4 @@ pub const MENU_WIDTH: u32 = 170;
 pub const RADIUS: u32 = 6;
 pub const MARGINS: u32 = 10;
 pub const COLUMNS: usize = 4;
+pub const MEDIA_IMAGE_SIZE: u32 = 75;

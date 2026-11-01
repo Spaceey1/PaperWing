@@ -14,6 +14,7 @@ edition = "2024"
 directories = "6.0.0"
 smol = "2.0.2"
 compositor_bridge = { path = "./compositor_bridge" }
+media = { path = "./media" }
 iced = { version = "0.14.0", features = ["smol", "lazy", "image"] }
 iced_layershell = { version = "0.18.1", features = ["unconditional-rendering"] }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -26,3 +27,4 @@ native-theme-iced = "0.5.7"
 async-signal = "0.2.14"
 font-kit = "0.14.3"
 tray_server = { path = "./tray", package = "tray" }
+isahc = "2.0.2"

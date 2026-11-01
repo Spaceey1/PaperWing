@@ -23,6 +23,7 @@ use iced::{
 };
 use iced_layershell::reexport::core::font;
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings};
+use isahc::AsyncReadResponseExt;
 use smol::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::process;
@@ -279,6 +280,44 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             .detach();
             Task::none()
         }
+        Message::PlayerChanged(player) => {
+            state.player = player;
+            Task::none()
+        }
+        Message::MediaChanged(media) => {
+            let url = media.as_ref().and_then(|m| m.art_url.clone());
+            state.media_meta = media;
+
+            if let Some(url) = url {
+                Task::future(async {
+                    if let Some(file_path) = url.strip_prefix("file://") {
+                        smol::fs::read(file_path).await.ok()
+                    } else {
+                        isahc::get_async(url).await.ok()?.bytes().await.ok()
+                    }
+                })
+                .map(|r| Message::NewImage(r))
+            } else {
+                Task::none()
+            }
+        }
+        Message::NewImage(new) => {
+            state.media_image = new;
+            Task::none()
+        }
+        Message::MediaControl(action) => match state.player.clone() {
+            Some(player) => Task::future(async move {
+                match action {
+                    crate::state::MediaControl::Skip => player.proxy.next().await,
+                    crate::state::MediaControl::Rewind => player.proxy.previous().await,
+                    crate::state::MediaControl::TogglePlay => player.proxy.play_pause().await,
+                }
+                .ok()?;
+                Some(())
+            })
+            .discard(),
+            None => Task::none(),
+        },
         _ => Task::none(),
     }
 }
@@ -326,6 +365,7 @@ pub fn start_app() {
                     ipc_subscription(),
                     tray_subscription(),
                     window_hover_subscription(),
+                    media_subscription(),
                     compositor_subscription(state),
                     animation_subscription(state),
                 ])

@@ -6,6 +6,7 @@ use compositor_bridge::{
 };
 use iced::{Animation, theme::Mode};
 use iced_layershell::to_layer_message;
+use media::{MprisMetadata, Player};
 use tray_server::{ItemId, MenuNode, TrayEvent, TrayItem};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -55,6 +56,9 @@ pub struct AppState {
     pub resize_pending: bool,
     pub peek_generation: u64,
     pub persistent_peek: bool,
+    pub player: Option<Player>,
+    pub media_meta: Option<MprisMetadata>,
+    pub media_image: Option<Vec<u8>>,
 }
 
 impl Default for AppState {
@@ -78,10 +82,19 @@ impl Default for AppState {
             resize_pending: false,
             peek_generation: 0,
             persistent_peek: false,
+            player: None,
+            media_meta: None,
+            media_image: None,
         }
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum MediaControl {
+    TogglePlay,
+    Skip,
+    Rewind,
+}
 #[to_layer_message]
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -104,4 +117,8 @@ pub enum Message {
     MouseLeave,
     Refresh,
     FocusWorkspace(WorkspaceId),
+    PlayerChanged(Option<media::Player>),
+    MediaChanged(Option<media::MprisMetadata>),
+    NewImage(Option<Vec<u8>>),
+    MediaControl(MediaControl),
 }

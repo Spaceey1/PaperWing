@@ -1,0 +1,12 @@
+[package]
+name = "media"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+serde = "1"
+futures-util = "0.3"
+zbus = "5.18"
+[dev-dependencies]
+smol = "2.0.2"

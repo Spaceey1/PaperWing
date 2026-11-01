@@ -1,6 +1,8 @@
 use crate::consts::COLUMNS;
 use crate::consts::MARGINS;
+use crate::consts::MEDIA_IMAGE_SIZE;
 use crate::consts::MENU_WIDTH;
+use crate::consts::RADIUS;
 use crate::consts::WINDOW_HEIGHT;
 use crate::helper;
 use crate::theme::BackgroundContainer;
@@ -11,11 +13,13 @@ use crate::tray::get_tray_icon;
 use battery::units::ratio::percent;
 use chrono::Timelike;
 use iced::alignment;
+use iced::widget::image;
 use iced::widget::image::Handle;
+use iced::widget::row;
 use iced::widget::scrollable;
 use iced::widget::scrollable::Direction;
 use iced::widget::scrollable::Scrollbar;
-use iced::widget::{Button, Row, button, column, container, space::*, text};
+use iced::widget::{Button, Row, button, column, container, responsive, space::*, text};
 use iced::{ContentFit, Element, Length, Theme};
 use std::hash::Hash;
 use tray_server::TrayItem;
@@ -142,6 +146,130 @@ pub fn button_box<'a>(icon: &String, text: &String) -> Button<'a, Message> {
         .style(button_style)
 }
 
+pub fn media_box<'a>(
+    metadata: &media::MprisMetadata,
+    image_data: impl Into<iced_layershell::reexport::core::Bytes>,
+) -> Element<'a, Message> {
+    let title = helper::truncate(
+        &metadata
+            .title
+            .as_deref()
+            .filter(|title| !title.is_empty())
+            .unwrap_or("Unknown title"),
+        16,
+    );
+    let artist = metadata
+        .artist
+        .as_ref()
+        .map(|artists| artists.join(", "))
+        .filter(|artist| !artist.is_empty())
+        .or_else(|| metadata.album.clone())
+        .unwrap_or_else(|| "Unknown artist".to_string());
+    let duration = metadata.length.map(format_duration).unwrap_or_default();
+
+    container(
+        row![
+            container(
+                image(Handle::from_bytes(image_data))
+                    .content_fit(ContentFit::Cover)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .border_radius(RADIUS),
+            )
+            .width(MEDIA_IMAGE_SIZE)
+            .height(Length::Fill)
+            .clip(true),
+            column![
+                text!("{}", helper::truncate(&title, 24))
+                    .size(14)
+                    .width(Length::Fill)
+                    .wrapping(text::Wrapping::None),
+                row![
+                    text!("{}", helper::truncate(&artist, 18))
+                        .size(11)
+                        .width(Length::Fill)
+                        .wrapping(text::Wrapping::None)
+                        .style(|theme: &Theme| {
+                            let mut style = text::primary(theme);
+                            style.color =
+                                Some(theme.extended_palette().primary.weak.text.scale_alpha(0.65));
+                            style
+                        }),
+                    text!("{}", duration)
+                        .size(11)
+                        .wrapping(text::Wrapping::None)
+                        .style(|theme: &Theme| {
+                            let mut style = text::primary(theme);
+                            style.color =
+                                Some(theme.extended_palette().primary.weak.text.scale_alpha(0.65));
+                            style
+                        }),
+                ]
+                .width(Length::Fill)
+                .spacing(4)
+                .align_y(alignment::Vertical::Center),
+                vertical(),
+                row![
+                    button(text!("󰒮").center())
+                        .on_press(Message::MediaControl(crate::state::MediaControl::Rewind))
+                        .width(Length::Fill)
+                        .height(20)
+                        .padding([2, 4])
+                        .style(button_style),
+                    button(text!("󰐎").center())
+                        .on_press(Message::MediaControl(
+                            crate::state::MediaControl::TogglePlay
+                        ))
+                        .width(Length::Fill)
+                        .height(20)
+                        .padding([2, 4])
+                        .style(button_style),
+                    button(text!("󰒭").center())
+                        .on_press(Message::MediaControl(crate::state::MediaControl::Skip))
+                        .width(Length::Fill)
+                        .height(20)
+                        .padding([2, 4])
+                        .style(button_style),
+                ]
+                .width(Length::Fill)
+                .spacing(4),
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(4),
+        ]
+        .padding(6)
+        .spacing(8)
+        .width(Length::Fill)
+        .height(Length::Fill),
+    )
+    .style(|theme: &Theme| {
+        let palette = theme.extended_palette();
+        container::primary(theme)
+            .background(palette.primary.weak.color)
+            .border(
+                iced::border::color(palette.primary.base.color.scale_alpha(0.35))
+                    .width(1)
+                    .rounded(RADIUS),
+            )
+            .color(palette.primary.weak.text)
+    })
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+fn format_duration(duration: std::time::Duration) -> String {
+    let seconds = duration.as_secs();
+    let minutes = seconds / 60;
+    let hours = minutes / 60;
+    if hours > 0 {
+        format!("{}:{:02}:{:02}", hours, minutes % 60, seconds % 60)
+    } else {
+        format!("{}:{:02}", minutes, seconds % 60)
+    }
+}
+
 const TRAY_ICON_SIZE: u32 = 32;
 
 struct TrayItemWrapper<'a>(pub &'a TrayItem);
@@ -220,6 +348,13 @@ pub fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Messag
     })
 }
 
+fn grid_row<'a>(cells: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    Row::with_children(cells)
+        .spacing(MARGINS)
+        .width(Length::Fill)
+        .into()
+}
+
 pub fn expanded_content(state: &AppState) -> Element<'_, Message> {
     let time = chrono::Local::now();
     column![
@@ -231,9 +366,52 @@ pub fn expanded_content(state: &AppState) -> Element<'_, Message> {
             ],
             vertical().height(MARGINS),
             iced::widget::scrollable(
-                iced::widget::grid(battery_indicators(state).chain(tray_buttons(state)))
-                    .spacing(MARGINS)
-                    .columns(COLUMNS),
+                responsive(move |size| {
+                    let cell_width = ((size.width
+                        - MARGINS as f32 * COLUMNS.saturating_sub(1) as f32)
+                        / COLUMNS as f32)
+                        .max(0.0);
+                    let mut cells = Vec::new();
+
+                    cells.extend(battery_indicators(state).map(|element| (element, 1)));
+                    if let (Some(media), Some(image)) = (&state.media_meta, &state.media_image) {
+                        cells.push((
+                            Element::from(iced::widget::lazy((media, image), |(media, image)| {
+                                media_box(media, image.to_vec())
+                            })),
+                            3,
+                        ));
+                    }
+                    cells.extend(tray_buttons(state).map(|element| (element, 1)));
+
+                    let mut rows = Vec::new();
+                    let mut row_cells = Vec::new();
+                    let mut used_columns = 0;
+
+                    for (element, span) in cells {
+                        if used_columns > 0 && used_columns + span > COLUMNS {
+                            rows.push(grid_row(std::mem::take(&mut row_cells)));
+                            used_columns = 0;
+                        }
+
+                        let width = cell_width * span as f32
+                            + MARGINS as f32 * span.saturating_sub(1) as f32;
+                        row_cells.push(container(element).width(width).height(cell_width).into());
+                        used_columns += span;
+
+                        if used_columns == COLUMNS {
+                            rows.push(grid_row(std::mem::take(&mut row_cells)));
+                            used_columns = 0;
+                        }
+                    }
+
+                    if !row_cells.is_empty() {
+                        rows.push(grid_row(row_cells));
+                    }
+
+                    column(rows).spacing(MARGINS).width(Length::Fill).into()
+                })
+                .height(Length::Shrink)
             )
             .height(Length::Fill)
         ]
