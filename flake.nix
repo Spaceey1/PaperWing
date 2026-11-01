@@ -1,6 +1,9 @@
 {
   inputs = {
-    naersk.url = "github:nix-community/naersk/master";
+    naersk = {
+      url = "github:nix-community/naersk";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
