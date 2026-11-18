@@ -351,8 +351,8 @@ pub fn battery_indicators(state: &AppState) -> impl Iterator<Item = Element<'_, 
         data_box(
             &"🔋".to_string(),
             &format!(
-                "{:02.2}%",
-                battery.state_of_charge().get::<percent>().to_string()
+                "{:.0}%",
+                battery.state_of_charge().get::<percent>()
             ),
         )
     }))
