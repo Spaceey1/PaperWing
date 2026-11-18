@@ -4,14 +4,12 @@ use crate::state::Message;
 use crate::tray::tray_listener;
 use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
-use iced::futures::select;
-use iced::futures::{FutureExt, StreamExt, stream::Stream};
+use iced::futures::StreamExt;
 use iced::{Event, event, mouse};
 use iced::{
     Subscription,
     futures::{SinkExt, channel::mpsc},
 };
-use std::pin::Pin;
 
 pub fn window_hover_subscription() -> Subscription<Message> {
     event::listen_with(|event, _, _| match event {
@@ -83,31 +81,18 @@ pub fn media_subscription() -> Subscription<Message> {
                 }
             };
 
-            // A player is handed over here when another one takes over while the
-            // current one is being watched, so it does not have to be awaited again.
-            let mut pending_player = None;
-
-            loop {
-                let player = match pending_player.take() {
-                    Some(player) => player,
-                    None => match players.next().await {
-                        Some(player) => player,
-                        None => break,
-                    },
+            while let Some(event) = players.next().await {
+                let message = match event {
+                    media::PlayerEvent::Added { player, metadata } => {
+                        Message::PlayerAdded(player, metadata)
+                    }
+                    media::PlayerEvent::Removed(name) => Message::PlayerRemoved(name),
+                    media::PlayerEvent::MetadataChanged { name, metadata } => {
+                        Message::MediaChanged(name, metadata)
+                    }
                 };
-
-                send_message(&mut output, Message::PlayerChanged(Some(player.clone()))).await;
-                send_message(&mut output, Message::MediaChanged(None)).await;
-
-                match watch_player(player, &mut players, &mut output).await {
-                    PlayerWatchEnd::SwitchTo(player) => pending_player = Some(player),
-                    PlayerWatchEnd::PlayerLost => clear_now_playing(&mut output).await,
-                    PlayerWatchEnd::NextPlayer => {}
-                    PlayerWatchEnd::Exhausted => break,
-                }
+                send_message(&mut output, message).await;
             }
-
-            clear_now_playing(&mut output).await;
         })
     })
 }
@@ -116,69 +101,4 @@ pub fn media_subscription() -> Subscription<Message> {
 /// has already been dropped.
 async fn send_message(output: &mut mpsc::Sender<Message>, message: Message) {
     output.send(message).await.ok();
-}
-
-async fn clear_now_playing(output: &mut mpsc::Sender<Message>) {
-    send_message(output, Message::PlayerChanged(None)).await;
-    send_message(output, Message::MediaChanged(None)).await;
-}
-
-/// Why we stopped forwarding the events of a player.
-enum PlayerWatchEnd {
-    /// Another player became the one to display.
-    SwitchTo(media::Player),
-    /// The watched player left the bus.
-    PlayerLost,
-    /// This player can no longer be watched; pick the next one.
-    NextPlayer,
-    /// No players are left at all.
-    Exhausted,
-}
-
-/// Forwards the metadata changes of `player` until it leaves the bus or another
-/// player takes over.
-async fn watch_player<S>(
-    player: media::Player,
-    players: &mut Pin<Box<S>>,
-    output: &mut mpsc::Sender<Message>,
-) -> PlayerWatchEnd
-where
-    S: Stream<Item = media::Player>,
-{
-    let mut metadata = player.proxy.receive_metadata_changed().await;
-    let mut owner_changed = match player.proxy.inner().receive_owner_changed().await {
-        Ok(owner_changed) => owner_changed,
-        Err(e) => {
-            eprintln!("Error watching media player owner: {e}");
-            return PlayerWatchEnd::NextPlayer;
-        }
-    };
-
-    loop {
-        let mut player_event = players.next().fuse();
-        let mut metadata_event = metadata.next().fuse();
-        let mut owner_event = owner_changed.next().fuse();
-
-        select! {
-            new_player = player_event => {
-                return match new_player {
-                    Some(player) => PlayerWatchEnd::SwitchTo(player),
-                    None => PlayerWatchEnd::Exhausted,
-                };
-            },
-            changed = metadata_event => match changed {
-                Some(changed) => match changed.get().await {
-                    Ok(metadata) => send_message(output, Message::MediaChanged(Some(metadata))).await,
-                    Err(e) => eprintln!("Error getting new metadata: {e}"),
-                },
-                None => return PlayerWatchEnd::NextPlayer,
-            },
-            owner = owner_event => {
-                return match owner {
-                    Some(_) => PlayerWatchEnd::PlayerLost,
-                    None => PlayerWatchEnd::NextPlayer,
-                };
-            },
-        }
-    }
 }

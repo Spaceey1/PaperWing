@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use compositor_bridge::{
     CompositorEvent,
@@ -56,9 +59,13 @@ pub struct AppState {
     pub resize_pending: bool,
     pub peek_generation: u64,
     pub persistent_peek: bool,
-    pub player: Option<Player>,
-    pub media_meta: Option<MprisMetadata>,
-    pub media_image: Option<Vec<u8>>,
+    pub players: BTreeMap<String, PlayerState>,
+}
+
+pub struct PlayerState {
+    pub player: Player,
+    pub metadata: Option<MprisMetadata>,
+    pub image: Option<Vec<u8>>,
 }
 
 impl Default for AppState {
@@ -82,9 +89,7 @@ impl Default for AppState {
             resize_pending: false,
             peek_generation: 0,
             persistent_peek: false,
-            player: None,
-            media_meta: None,
-            media_image: None,
+            players: BTreeMap::new(),
         }
     }
 }
@@ -117,8 +122,9 @@ pub enum Message {
     MouseLeave,
     Refresh,
     FocusWorkspace(WorkspaceId),
-    PlayerChanged(Option<media::Player>),
-    MediaChanged(Option<media::MprisMetadata>),
-    NewImage(Option<Vec<u8>>),
-    MediaControl(MediaControl),
+    PlayerAdded(media::Player, Option<media::MprisMetadata>),
+    PlayerRemoved(String),
+    MediaChanged(String, Option<media::MprisMetadata>),
+    NewImage(String, String, Option<Vec<u8>>),
+    MediaControl(String, MediaControl),
 }

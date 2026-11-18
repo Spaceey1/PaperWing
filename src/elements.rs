@@ -146,29 +146,43 @@ pub fn button_box<'a>(icon: &String, text: &String) -> Button<'a, Message> {
         .style(button_style)
 }
 
-pub fn media_box<'a>(
-    metadata: &media::MprisMetadata,
-    image_data: impl Into<iced_layershell::reexport::core::Bytes>,
-) -> Element<'a, Message> {
+pub fn media_box(
+    player_name: &str,
+    metadata: Option<&media::MprisMetadata>,
+    image_data: Option<Vec<u8>>,
+) -> Element<'static, Message> {
     let title = helper::truncate(
-        &metadata
-            .title
-            .as_deref()
+        metadata
+            .and_then(|metadata| metadata.title.as_deref())
             .filter(|title| !title.is_empty())
-            .unwrap_or("Unknown title"),
-        16,
+            .unwrap_or(player_name),
+        8,
     );
     let artist = metadata
-        .artist
-        .as_ref()
-        .map(|artists| artists.join(", "))
-        .filter(|artist| !artist.is_empty())
-        .or_else(|| metadata.album.clone())
+        .and_then(|metadata| {
+            metadata
+                .artist
+                .as_ref()
+                .map(|artists| artists.join(", "))
+                .filter(|artist| !artist.is_empty())
+                .or_else(|| metadata.album.clone())
+        })
+        .map(|s| helper::truncate(&s, 8))
         .unwrap_or_else(|| "Unknown artist".to_string());
-    let duration = metadata.length.map(format_duration).unwrap_or_default();
+    let duration = metadata
+        .and_then(|metadata| metadata.length)
+        .map(format_duration)
+        .unwrap_or_default();
+    let rewind = Message::MediaControl(player_name.to_string(), crate::state::MediaControl::Rewind);
+    let toggle = Message::MediaControl(
+        player_name.to_string(),
+        crate::state::MediaControl::TogglePlay,
+    );
+    let skip = Message::MediaControl(player_name.to_string(), crate::state::MediaControl::Skip);
 
-    container(
-        row![
+    let mut content_row = row![];
+    if let Some(image_data) = image_data {
+        content_row = content_row.push(
             container(
                 image(Handle::from_bytes(image_data))
                     .content_fit(ContentFit::Cover)
@@ -179,69 +193,75 @@ pub fn media_box<'a>(
             .width(MEDIA_IMAGE_SIZE)
             .height(Length::Fill)
             .clip(true),
-            column![
-                text!("{}", helper::truncate(&title, 24))
-                    .size(14)
+        );
+    }
+
+    container(
+        content_row
+            .push(
+                column![
+                    text!("{}", helper::truncate(&title, 24))
+                        .size(14)
+                        .width(Length::Fill)
+                        .wrapping(text::Wrapping::None),
+                    row![
+                        text!("{}", helper::truncate(&artist, 18))
+                            .size(11)
+                            .width(Length::Fill)
+                            .wrapping(text::Wrapping::None)
+                            .style(|theme: &Theme| {
+                                let mut style = text::primary(theme);
+                                style.color = Some(
+                                    theme.extended_palette().primary.weak.text.scale_alpha(0.65),
+                                );
+                                style
+                            }),
+                        text!("{}", duration)
+                            .size(11)
+                            .wrapping(text::Wrapping::None)
+                            .style(|theme: &Theme| {
+                                let mut style = text::primary(theme);
+                                style.color = Some(
+                                    theme.extended_palette().primary.weak.text.scale_alpha(0.65),
+                                );
+                                style
+                            }),
+                    ]
                     .width(Length::Fill)
-                    .wrapping(text::Wrapping::None),
-                row![
-                    text!("{}", helper::truncate(&artist, 18))
-                        .size(11)
-                        .width(Length::Fill)
-                        .wrapping(text::Wrapping::None)
-                        .style(|theme: &Theme| {
-                            let mut style = text::primary(theme);
-                            style.color =
-                                Some(theme.extended_palette().primary.weak.text.scale_alpha(0.65));
-                            style
-                        }),
-                    text!("{}", duration)
-                        .size(11)
-                        .wrapping(text::Wrapping::None)
-                        .style(|theme: &Theme| {
-                            let mut style = text::primary(theme);
-                            style.color =
-                                Some(theme.extended_palette().primary.weak.text.scale_alpha(0.65));
-                            style
-                        }),
+                    .spacing(4)
+                    .align_y(alignment::Vertical::Center),
+                    vertical(),
+                    row![
+                        button(text!("󰒮").center())
+                            .on_press(rewind)
+                            .width(Length::Fill)
+                            .height(20)
+                            .padding([2, 4])
+                            .style(button_style),
+                        button(text!("󰐎").center())
+                            .on_press(toggle)
+                            .width(Length::Fill)
+                            .height(20)
+                            .padding([2, 4])
+                            .style(button_style),
+                        button(text!("󰒭").center())
+                            .on_press(skip)
+                            .width(Length::Fill)
+                            .height(20)
+                            .padding([2, 4])
+                            .style(button_style),
+                    ]
+                    .width(Length::Fill)
+                    .spacing(4),
                 ]
                 .width(Length::Fill)
-                .spacing(4)
-                .align_y(alignment::Vertical::Center),
-                vertical(),
-                row![
-                    button(text!("󰒮").center())
-                        .on_press(Message::MediaControl(crate::state::MediaControl::Rewind))
-                        .width(Length::Fill)
-                        .height(20)
-                        .padding([2, 4])
-                        .style(button_style),
-                    button(text!("󰐎").center())
-                        .on_press(Message::MediaControl(
-                            crate::state::MediaControl::TogglePlay
-                        ))
-                        .width(Length::Fill)
-                        .height(20)
-                        .padding([2, 4])
-                        .style(button_style),
-                    button(text!("󰒭").center())
-                        .on_press(Message::MediaControl(crate::state::MediaControl::Skip))
-                        .width(Length::Fill)
-                        .height(20)
-                        .padding([2, 4])
-                        .style(button_style),
-                ]
-                .width(Length::Fill)
+                .height(Length::Fill)
                 .spacing(4),
-            ]
+            )
+            .padding(6)
+            .spacing(8)
             .width(Length::Fill)
-            .height(Length::Fill)
-            .spacing(4),
-        ]
-        .padding(6)
-        .spacing(8)
-        .width(Length::Fill)
-        .height(Length::Fill),
+            .height(Length::Fill),
     )
     .style(|theme: &Theme| {
         let palette = theme.extended_palette();
@@ -374,12 +394,16 @@ pub fn expanded_content(state: &AppState) -> Element<'_, Message> {
                     let mut cells = Vec::new();
 
                     cells.extend(battery_indicators(state).map(|element| (element, 1)));
-                    if let (Some(media), Some(image)) = (&state.media_meta, &state.media_image) {
+                    for (name, player) in &state.players {
+                        let dependency = (name, &player.metadata, &player.image);
                         cells.push((
-                            Element::from(iced::widget::lazy((media, image), |(media, image)| {
-                                media_box(media, image.to_vec())
-                            })),
-                            3,
+                            Element::from(iced::widget::lazy(
+                                dependency,
+                                |(name, metadata, image)| {
+                                    media_box(name.as_str(), (*metadata).as_ref(), (*image).clone())
+                                },
+                            )),
+                            2,
                         ));
                     }
                     cells.extend(tray_buttons(state).map(|element| (element, 1)));

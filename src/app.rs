@@ -4,6 +4,7 @@ use crate::elements::{self, *};
 use crate::ipc::{SOCKET_MADE, get_sock_path};
 use crate::state::BarState;
 use crate::state::Message;
+use crate::state::PlayerState;
 use crate::theme::BackgroundContainer;
 use crate::tray::get_tray_host;
 use crate::{
@@ -280,44 +281,75 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             .detach();
             Task::none()
         }
-        Message::PlayerChanged(player) => {
-            state.player = player;
-            Task::none()
-        }
-        Message::MediaChanged(media) => {
-            let url = media.as_ref().and_then(|m| m.art_url.clone());
-            state.media_meta = media;
-
-            if let Some(url) = url {
-                Task::future(async {
-                    if let Some(file_path) = url.strip_prefix("file://") {
-                        smol::fs::read(file_path).await.ok()
-                    } else {
-                        isahc::get_async(url).await.ok()?.bytes().await.ok()
-                    }
-                })
-                .map(|r| Message::NewImage(r))
+        Message::PlayerAdded(player, metadata) => {
+            let name = player.name().to_string();
+            state.players.insert(
+                name.clone(),
+                PlayerState {
+                    player,
+                    metadata: None,
+                    image: None,
+                },
+            );
+            if metadata.is_some() {
+                Task::done(Message::MediaChanged(name, metadata))
             } else {
                 Task::none()
             }
         }
-        Message::NewImage(new) => {
-            state.media_image = new;
+        Message::PlayerRemoved(name) => {
+            state.players.remove(&name);
             Task::none()
         }
-        Message::MediaControl(action) => match state.player.clone() {
-            Some(player) => Task::future(async move {
-                match action {
-                    crate::state::MediaControl::Skip => player.proxy.next().await,
-                    crate::state::MediaControl::Rewind => player.proxy.previous().await,
-                    crate::state::MediaControl::TogglePlay => player.proxy.play_pause().await,
-                }
-                .ok()?;
-                Some(())
-            })
-            .discard(),
-            None => Task::none(),
-        },
+        Message::MediaChanged(name, media) => {
+            let Some(player) = state.players.get_mut(&name) else {
+                return Task::none();
+            };
+            let url = media.as_ref().and_then(|m| m.art_url.clone());
+            player.metadata = media;
+            player.image = None;
+
+            if let Some(url) = url {
+                let image_url = url.clone();
+                Task::future(async move {
+                    if let Some(file_path) = image_url.strip_prefix("file://") {
+                        smol::fs::read(file_path).await.ok()
+                    } else {
+                        isahc::get_async(image_url).await.ok()?.bytes().await.ok()
+                    }
+                })
+                .map(move |r| Message::NewImage(name.clone(), url.clone(), r))
+            } else {
+                Task::none()
+            }
+        }
+        Message::NewImage(name, url, new) => {
+            if let Some(player) = state.players.get_mut(&name)
+                && player
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.art_url.as_deref())
+                    == Some(url.as_str())
+            {
+                player.image = new;
+            }
+            Task::none()
+        }
+        Message::MediaControl(name, action) => {
+            match state.players.get(&name).map(|p| p.player.clone()) {
+                Some(player) => Task::future(async move {
+                    match action {
+                        crate::state::MediaControl::Skip => player.proxy.next().await,
+                        crate::state::MediaControl::Rewind => player.proxy.previous().await,
+                        crate::state::MediaControl::TogglePlay => player.proxy.play_pause().await,
+                    }
+                    .ok()?;
+                    Some(())
+                })
+                .discard(),
+                None => Task::none(),
+            }
+        }
         _ => Task::none(),
     }
 }

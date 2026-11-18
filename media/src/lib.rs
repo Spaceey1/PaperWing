@@ -179,8 +179,26 @@ pub trait Player {
 #[derive(Clone, Debug)]
 pub struct Player {
     pub proxy: PlayerProxy<'static>,
-    #[allow(dead_code)]
     name: String,
+}
+
+impl Player {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum PlayerEvent {
+    Added {
+        player: Player,
+        metadata: Option<MprisMetadata>,
+    },
+    Removed(String),
+    MetadataChanged {
+        name: String,
+        metadata: Option<MprisMetadata>,
+    },
 }
 
 /// Message indicating whether a player bus name was acquired (added) or lost (removed).
@@ -209,140 +227,119 @@ async fn player_events() -> Result<impl Stream<Item = PlayerMessage>> {
         }))
 }
 
-#[derive(Debug)]
-struct PlaybackMessage {
-    name: String,
-    status: String,
-}
+type MetadataStream = stream::BoxStream<'static, (String, MprisMetadata)>;
 
 enum StreamEvent {
     Player(PlayerMessage),
-    Playback(PlaybackMessage),
+    Metadata((String, MprisMetadata)),
 }
 
-type PlaybackStream = stream::BoxStream<'static, PlaybackMessage>;
-
-async fn playback_stream(name: String, proxy: PlayerProxy<'static>) -> PlaybackStream {
-    let statuses = proxy.receive_playback_status_changed().await;
-    statuses
+async fn metadata_stream(name: String, proxy: PlayerProxy<'static>) -> MetadataStream {
+    proxy
+        .receive_metadata_changed()
+        .await
         .filter_map(move |changed| {
             let name = name.clone();
-            async move {
-                let status = changed.get().await.ok()?;
-                Some(PlaybackMessage { name, status })
-            }
+            async move { changed.get().await.ok().map(|metadata| (name, metadata)) }
         })
         .boxed()
 }
 
-async fn add_player(players: &mut BTreeMap<String, PlayerProxy<'static>>, name: String) -> bool {
-    let Ok(proxy) = player_from_name(&name).await else {
-        return false;
-    };
-    players.insert(name, proxy);
-    true
-}
-
-async fn subscribe_playback(
-    players: &BTreeMap<String, PlayerProxy<'static>>,
-) -> stream::SelectAll<PlaybackStream> {
+async fn subscribe_metadata(
+    players: &BTreeMap<String, Player>,
+) -> stream::SelectAll<MetadataStream> {
     let mut streams = stream::SelectAll::new();
-    for (name, proxy) in players {
-        streams.push(playback_stream(name.clone(), proxy.clone()).await);
+    for (name, player) in players {
+        streams.push(metadata_stream(name.clone(), player.proxy.clone()).await);
     }
     streams
 }
 
-async fn select_player(players: &BTreeMap<String, PlayerProxy<'static>>) -> Option<String> {
-    let mut fallback = None;
-    for (name, proxy) in players {
-        fallback.get_or_insert_with(|| name.clone());
-        if matches!(proxy.playback_status().await, Ok(status) if status == "Playing") {
-            return Some(name.clone());
-        }
-    }
-    fallback
-}
-
-pub async fn player_stream() -> Result<impl Stream<Item = Player>> {
+pub async fn player_stream() -> Result<impl Stream<Item = PlayerEvent>> {
     let events = player_events().await?.boxed();
 
     let connection = Connection::session().await?;
     let dbus_proxy = DBusProxy::new(&connection).await?;
     let names = dbus_proxy.list_names().await?;
     let mut players = BTreeMap::new();
+    let mut initial_events = Vec::new();
 
     for name in names {
         if let Some(name) = name.strip_prefix(MEDIA_BUS_PREFIX) {
-            add_player(&mut players, name.to_string()).await;
+            let Ok(proxy) = player_from_name(name).await else {
+                continue;
+            };
+            let metadata = proxy.metadata().await.ok();
+            let player = Player {
+                proxy,
+                name: name.to_string(),
+            };
+            players.insert(name.to_string(), player.clone());
+            initial_events.push(PlayerEvent::Added { player, metadata });
         }
     }
-    let playback_streams = subscribe_playback(&players).await;
 
-    let state = (events, players, playback_streams, None);
+    let metadata_streams = subscribe_metadata(&players).await;
+
+    let state = (
+        events,
+        players,
+        metadata_streams,
+        initial_events.into_iter(),
+    );
     Ok(stream::unfold(
         state,
-        |(mut events, mut players, mut playback_streams, mut current)| async move {
+        |(mut events, mut players, mut metadata_streams, mut initial_events)| async move {
             loop {
-                if current.is_none() {
-                    if let Some(name) = select_player(&players).await {
-                        current = Some(name.clone());
-                        return Some((
-                            Player {
-                                proxy: players[&name].clone(),
-                                name,
-                            },
-                            (events, players, playback_streams, current),
-                        ));
-                    }
+                if let Some(event) = initial_events.next() {
+                    return Some((event, (events, players, metadata_streams, initial_events)));
                 }
 
-                let event = if playback_streams.is_empty() {
+                let event = if metadata_streams.is_empty() {
                     events.next().await.map(StreamEvent::Player)
                 } else {
                     let player_event = events.next();
-                    let playback_event = playback_streams.next();
-                    futures_util::pin_mut!(player_event, playback_event);
-                    match future::select(player_event, playback_event).await {
+                    let metadata_event = metadata_streams.next();
+                    futures_util::pin_mut!(player_event, metadata_event);
+                    match future::select(player_event, metadata_event).await {
                         future::Either::Left((event, _)) => event.map(StreamEvent::Player),
-                        future::Either::Right((event, _)) => event.map(StreamEvent::Playback),
+                        future::Either::Right((event, _)) => event.map(StreamEvent::Metadata),
                     }
                 };
 
                 match event {
                     Some(StreamEvent::Player(PlayerMessage::Added(name))) => {
-                        let replaces_current = current.as_deref() == Some(name.as_str());
-                        if add_player(&mut players, name).await {
-                            playback_streams = subscribe_playback(&players).await;
-                            if replaces_current {
-                                current = None;
-                            }
-                        }
+                        let Ok(proxy) = player_from_name(&name).await else {
+                            continue;
+                        };
+                        let metadata = proxy.metadata().await.ok();
+                        let player = Player {
+                            proxy,
+                            name: name.clone(),
+                        };
+                        players.insert(name, player.clone());
+                        metadata_streams = subscribe_metadata(&players).await;
+                        return Some((
+                            PlayerEvent::Added { player, metadata },
+                            (events, players, metadata_streams, initial_events),
+                        ));
                     }
                     Some(StreamEvent::Player(PlayerMessage::Removed(name))) => {
                         players.remove(&name);
-                        playback_streams = subscribe_playback(&players).await;
-                        if current.as_deref() == Some(name.as_str()) {
-                            current = None;
-                        }
+                        metadata_streams = subscribe_metadata(&players).await;
+                        return Some((
+                            PlayerEvent::Removed(name),
+                            (events, players, metadata_streams, initial_events),
+                        ));
                     }
-                    Some(StreamEvent::Playback(PlaybackMessage { name, status })) => {
-                        let Some(proxy) = players.get(&name) else {
-                            continue;
-                        };
-                        if status != "Playing" {
-                            continue;
-                        }
-                        if current.as_deref() != Some(name.as_str()) {
-                            current = Some(name.clone());
-                            return Some((
-                                Player {
-                                    proxy: proxy.clone(),
-                                    name,
-                                },
-                                (events, players, playback_streams, current),
-                            ));
-                        }
+                    Some(StreamEvent::Metadata((name, metadata))) => {
+                        return Some((
+                            PlayerEvent::MetadataChanged {
+                                name,
+                                metadata: Some(metadata),
+                            },
+                            (events, players, metadata_streams, initial_events),
+                        ));
                     }
                     None => return None,
                 }
