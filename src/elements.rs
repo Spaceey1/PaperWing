@@ -642,10 +642,9 @@ fn first_free_slot(
     }
 }
 
-/// Horizontal gutter shared by every bar content layout so all states
-/// line up with each other regardless of their vertical padding.
+/// Horizontal gutter shared by every bar content layout so all states line up with each other
 fn content_padding() -> iced::Padding {
-    iced::padding::horizontal(MARGINS)
+    iced::padding::all(MARGINS)
 }
 
 fn top_bar<'a>(state: &'a AppState) -> Element<'a, Message> {
