@@ -4,6 +4,7 @@ use crate::state::BarState;
 use crate::state::BatteryInfo;
 use crate::state::BatteryStatus;
 use crate::state::Message;
+use crate::state::PlayerState;
 use crate::tray::tray_listener;
 use battery::units::ratio::percent;
 use chrono::Timelike;
@@ -131,12 +132,31 @@ pub fn media_subscription() -> Subscription<Message> {
 
             while let Some(event) = players.next().await {
                 let message = match event {
-                    media::PlayerEvent::Added { player, metadata } => {
-                        Message::PlayerAdded(player, metadata)
-                    }
+                    media::PlayerEvent::Added {
+                        player,
+                        metadata,
+                        volume,
+                    } => Message::PlayerAdded(PlayerState {
+                        player,
+                        metadata,
+                        volume: volume.map(|volume| volume as f32),
+                        image: None,
+                        image_url: None,
+                    }),
                     media::PlayerEvent::Removed(name) => Message::PlayerRemoved(name),
-                    media::PlayerEvent::MetadataChanged { name, metadata } => {
-                        Message::MediaChanged(name, metadata)
+                    media::PlayerEvent::MetadataChanged {
+                        player,
+                        metadata,
+                        volume,
+                    } => Message::MediaChanged(PlayerState {
+                        player,
+                        metadata: Some(metadata),
+                        volume: volume.map(|volume| volume as f32),
+                        image: None,
+                        image_url: None,
+                    }),
+                    media::PlayerEvent::VolumeChanged { name, volume } => {
+                        Message::VolumeChanged(name, volume.map(|volume| volume as f32))
                     }
                 };
                 send_message(&mut output, message).await;

@@ -20,8 +20,9 @@ use iced::widget::row;
 use iced::widget::scrollable;
 use iced::widget::scrollable::Direction;
 use iced::widget::scrollable::Scrollbar;
+use iced::widget::vertical_slider;
 use iced::widget::{Button, Row, button, column, container, responsive, space::*, text};
-use iced::{ContentFit, Element, Length, Point, Rectangle, Theme, mouse};
+use iced::{Color, ContentFit, Element, Length, Point, Rectangle, Theme, mouse};
 use std::hash::Hash;
 use std::sync::LazyLock;
 use std::time::Instant;
@@ -155,14 +156,15 @@ pub fn button_box<'a>(icon: &String, text: &String) -> Button<'a, Message> {
 pub fn media_box(
     player_name: &str,
     metadata: Option<&media::MprisMetadata>,
-    image_data: Option<Vec<u8>>,
+    artwork: Option<Handle>,
+    volume: Option<f32>,
 ) -> Element<'static, Message> {
     let title = helper::truncate(
         metadata
             .and_then(|metadata| metadata.title.as_deref())
             .filter(|title| !title.is_empty())
             .unwrap_or(player_name),
-        8,
+        16,
     );
     let artist = metadata
         .and_then(|metadata| {
@@ -186,11 +188,17 @@ pub fn media_box(
     );
     let skip = Message::MediaControl(player_name.to_string(), crate::state::MediaControl::Skip);
 
+    let secondary_style = |theme: &Theme| {
+        let mut style = text::primary(theme);
+        style.color = Some(theme.extended_palette().primary.weak.text.scale_alpha(0.65));
+        style
+    };
+
     let mut content_row = row![];
-    if let Some(image_data) = image_data {
+    if let Some(handle) = artwork {
         content_row = content_row.push(
             container(
-                image(Handle::from_bytes(image_data))
+                image(handle)
                     .content_fit(ContentFit::Cover)
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -202,68 +210,77 @@ pub fn media_box(
         );
     }
 
-    container(
-        content_row
-            .push(
-                column![
-                    text!("{}", helper::truncate(&title, 24))
-                        .size(14)
+    content_row = content_row.push(
+        container(
+            column![
+                text!("{}", helper::truncate(&title, 24))
+                    .size(14)
+                    .width(Length::Fill)
+                    .wrapping(text::Wrapping::None),
+                row![
+                    text!("{}", helper::truncate(&artist, 18))
+                        .size(11)
                         .width(Length::Fill)
-                        .wrapping(text::Wrapping::None),
-                    row![
-                        text!("{}", helper::truncate(&artist, 18))
-                            .size(11)
-                            .width(Length::Fill)
-                            .wrapping(text::Wrapping::None)
-                            .style(|theme: &Theme| {
-                                let mut style = text::primary(theme);
-                                style.color = Some(
-                                    theme.extended_palette().primary.weak.text.scale_alpha(0.65),
-                                );
-                                style
-                            }),
-                        text!("{}", duration)
-                            .size(11)
-                            .wrapping(text::Wrapping::None)
-                            .style(|theme: &Theme| {
-                                let mut style = text::primary(theme);
-                                style.color = Some(
-                                    theme.extended_palette().primary.weak.text.scale_alpha(0.65),
-                                );
-                                style
-                            }),
-                    ]
-                    .width(Length::Fill)
-                    .spacing(4)
-                    .align_y(alignment::Vertical::Center),
-                    vertical(),
-                    row![
-                        button(text!("󰒮").center())
-                            .on_press(rewind)
-                            .width(Length::Fill)
-                            .height(20)
-                            .padding([2, 4])
-                            .style(button_style),
-                        button(text!("󰐎").center())
-                            .on_press(toggle)
-                            .width(Length::Fill)
-                            .height(20)
-                            .padding([2, 4])
-                            .style(button_style),
-                        button(text!("󰒭").center())
-                            .on_press(skip)
-                            .width(Length::Fill)
-                            .height(20)
-                            .padding([2, 4])
-                            .style(button_style),
-                    ]
-                    .width(Length::Fill)
-                    .spacing(4),
+                        .wrapping(text::Wrapping::None)
+                        .style(secondary_style),
+                    text!("{}", duration)
+                        .size(11)
+                        .wrapping(text::Wrapping::None)
+                        .style(secondary_style),
                 ]
                 .width(Length::Fill)
-                .height(Length::Fill)
+                .spacing(4)
+                .align_y(alignment::Vertical::Center),
+                vertical(),
+                row![
+                    button(text!("󰒮").center())
+                        .on_press(rewind)
+                        .width(Length::Fill)
+                        .height(20)
+                        .padding([2, 4])
+                        .style(button_style),
+                    button(text!("󰐎").center())
+                        .on_press(toggle)
+                        .width(Length::Fill)
+                        .height(20)
+                        .padding([2, 4])
+                        .style(button_style),
+                    button(text!("󰒭").center())
+                        .on_press(skip)
+                        .width(Length::Fill)
+                        .height(20)
+                        .padding([2, 4])
+                        .style(button_style),
+                ]
+                .width(Length::Fill)
                 .spacing(4),
-            )
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(4),
+        )
+        // Titles are truncated by character count, so keep them from bleeding
+        // into the volume slider when the card gets narrow.
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .clip(true),
+    );
+
+    if let Some(volume) = volume {
+        let player_name = player_name.to_string();
+        content_row = content_row.push(
+            vertical_slider(0.0..=1.0, volume.clamp(0.0, 1.0), move |value| {
+                Message::VolumeChanged(player_name.clone(), Some(value))
+            })
+            .step(0.01_f32)
+            .width(20.0)
+            .height(Length::Fill)
+            .style(volume_slider_style),
+        );
+    }
+
+    container(
+        content_row
             .padding(6)
             .spacing(8)
             .width(Length::Fill)
@@ -283,6 +300,17 @@ pub fn media_box(
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
+}
+
+fn volume_slider_style(theme: &Theme, status: vertical_slider::Status) -> vertical_slider::Style {
+    let palette = theme.extended_palette();
+    let mut style = vertical_slider::default(theme, status);
+    style.rail.backgrounds = (
+        palette.primary.base.color.into(),
+        palette.primary.weak.text.scale_alpha(0.25).into(),
+    );
+    style.handle.shape = vertical_slider::HandleShape::Circle { radius: 0.0 };
+    style
 }
 
 fn format_duration(duration: std::time::Duration) -> String {
@@ -676,15 +704,21 @@ pub fn expanded_content(state: &AppState) -> Element<'_, Message> {
                                 .map(|element| GridCell::new(element).row_span(2)),
                         );
                         for (name, player) in &state.players {
-                            let dependency = (name, &player.metadata, &player.image);
+                            // Only the handle id takes part in the dependency hash, so
+                            // the artwork is neither re-hashed nor re-decoded on rebuild.
+                            let image = player.image.clone();
+                            let image_id = image.as_ref().map(Handle::id);
+                            let volume = player.volume.map(f32::to_bits);
+                            let dependency = (name, &player.metadata, image_id, volume);
                             cells.push(
                                 GridCell::new(iced::widget::lazy(
                                     dependency,
-                                    |(name, metadata, image)| {
+                                    move |(name, metadata, _, volume)| {
                                         media_box(
                                             name.as_str(),
                                             (*metadata).as_ref(),
-                                            (*image).clone(),
+                                            image.clone(),
+                                            volume.map(f32::from_bits),
                                         )
                                     },
                                 ))

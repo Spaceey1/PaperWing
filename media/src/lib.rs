@@ -193,11 +193,17 @@ pub enum PlayerEvent {
     Added {
         player: Player,
         metadata: Option<MprisMetadata>,
+        volume: Option<f64>,
     },
     Removed(String),
     MetadataChanged {
+        player: Player,
+        metadata: MprisMetadata,
+        volume: Option<f64>,
+    },
+    VolumeChanged {
         name: String,
-        metadata: Option<MprisMetadata>,
+        volume: Option<f64>,
     },
 }
 
@@ -227,30 +233,59 @@ async fn player_events() -> Result<impl Stream<Item = PlayerMessage>> {
         }))
 }
 
-type MetadataStream = stream::BoxStream<'static, (String, MprisMetadata)>;
+enum PropertyEvent {
+    Metadata(String, MprisMetadata, Option<f64>),
+    Volume(String, f64),
+}
+
+type PropertyStream = stream::BoxStream<'static, PropertyEvent>;
 
 enum StreamEvent {
     Player(PlayerMessage),
-    Metadata((String, MprisMetadata)),
+    Property(PropertyEvent),
 }
 
-async fn metadata_stream(name: String, proxy: PlayerProxy<'static>) -> MetadataStream {
-    proxy
+async fn property_stream(name: String, proxy: PlayerProxy<'static>) -> PropertyStream {
+    let metadata_name = name.clone();
+    let metadata_proxy = proxy.clone();
+    let metadata = proxy
         .receive_metadata_changed()
         .await
         .filter_map(move |changed| {
-            let name = name.clone();
-            async move { changed.get().await.ok().map(|metadata| (name, metadata)) }
+            let name = metadata_name.clone();
+            let proxy = metadata_proxy.clone();
+            async move {
+                let metadata = changed.get().await.ok()?;
+                // Read the volume alongside the metadata so listeners get a
+                // complete picture of the player in one event.
+                let volume = proxy.volume().await.ok();
+                Some(PropertyEvent::Metadata(name, metadata, volume))
+            }
         })
-        .boxed()
+        .boxed();
+    let volume = proxy
+        .receive_volume_changed()
+        .await
+        .filter_map(move |changed| {
+            let name = name.clone();
+            async move {
+                changed
+                    .get()
+                    .await
+                    .ok()
+                    .map(|volume| PropertyEvent::Volume(name, volume))
+            }
+        })
+        .boxed();
+    stream::select(metadata, volume).boxed()
 }
 
-async fn subscribe_metadata(
+async fn subscribe_properties(
     players: &BTreeMap<String, Player>,
-) -> stream::SelectAll<MetadataStream> {
+) -> stream::SelectAll<PropertyStream> {
     let mut streams = stream::SelectAll::new();
     for (name, player) in players {
-        streams.push(metadata_stream(name.clone(), player.proxy.clone()).await);
+        streams.push(property_stream(name.clone(), player.proxy.clone()).await);
     }
     streams
 }
@@ -270,40 +305,45 @@ pub async fn player_stream() -> Result<impl Stream<Item = PlayerEvent>> {
                 continue;
             };
             let metadata = proxy.metadata().await.ok();
+            let volume = proxy.volume().await.ok();
             let player = Player {
                 proxy,
                 name: name.to_string(),
             };
             players.insert(name.to_string(), player.clone());
-            initial_events.push(PlayerEvent::Added { player, metadata });
+            initial_events.push(PlayerEvent::Added {
+                player,
+                metadata,
+                volume,
+            });
         }
     }
 
-    let metadata_streams = subscribe_metadata(&players).await;
+    let property_streams = subscribe_properties(&players).await;
 
     let state = (
         events,
         players,
-        metadata_streams,
+        property_streams,
         initial_events.into_iter(),
     );
     Ok(stream::unfold(
         state,
-        |(mut events, mut players, mut metadata_streams, mut initial_events)| async move {
+        |(mut events, mut players, mut property_streams, mut initial_events)| async move {
             loop {
                 if let Some(event) = initial_events.next() {
-                    return Some((event, (events, players, metadata_streams, initial_events)));
+                    return Some((event, (events, players, property_streams, initial_events)));
                 }
 
-                let event = if metadata_streams.is_empty() {
+                let event = if property_streams.is_empty() {
                     events.next().await.map(StreamEvent::Player)
                 } else {
                     let player_event = events.next();
-                    let metadata_event = metadata_streams.next();
-                    futures_util::pin_mut!(player_event, metadata_event);
-                    match future::select(player_event, metadata_event).await {
+                    let property_event = property_streams.next();
+                    futures_util::pin_mut!(player_event, property_event);
+                    match future::select(player_event, property_event).await {
                         future::Either::Left((event, _)) => event.map(StreamEvent::Player),
-                        future::Either::Right((event, _)) => event.map(StreamEvent::Metadata),
+                        future::Either::Right((event, _)) => event.map(StreamEvent::Property),
                     }
                 };
 
@@ -313,32 +353,54 @@ pub async fn player_stream() -> Result<impl Stream<Item = PlayerEvent>> {
                             continue;
                         };
                         let metadata = proxy.metadata().await.ok();
+                        let volume = proxy.volume().await.ok();
                         let player = Player {
                             proxy,
                             name: name.clone(),
                         };
                         players.insert(name, player.clone());
-                        metadata_streams = subscribe_metadata(&players).await;
+                        property_streams = subscribe_properties(&players).await;
                         return Some((
-                            PlayerEvent::Added { player, metadata },
-                            (events, players, metadata_streams, initial_events),
+                            PlayerEvent::Added {
+                                player,
+                                metadata,
+                                volume,
+                            },
+                            (events, players, property_streams, initial_events),
                         ));
                     }
                     Some(StreamEvent::Player(PlayerMessage::Removed(name))) => {
                         players.remove(&name);
-                        metadata_streams = subscribe_metadata(&players).await;
+                        property_streams = subscribe_properties(&players).await;
                         return Some((
                             PlayerEvent::Removed(name),
-                            (events, players, metadata_streams, initial_events),
+                            (events, players, property_streams, initial_events),
                         ));
                     }
-                    Some(StreamEvent::Metadata((name, metadata))) => {
+                    Some(StreamEvent::Property(PropertyEvent::Metadata(
+                        name,
+                        metadata,
+                        volume,
+                    ))) => {
+                        let Some(player) = players.get(&name).cloned() else {
+                            continue;
+                        };
                         return Some((
                             PlayerEvent::MetadataChanged {
-                                name,
-                                metadata: Some(metadata),
+                                player,
+                                metadata,
+                                volume,
                             },
-                            (events, players, metadata_streams, initial_events),
+                            (events, players, property_streams, initial_events),
+                        ));
+                    }
+                    Some(StreamEvent::Property(PropertyEvent::Volume(name, volume))) => {
+                        return Some((
+                            PlayerEvent::VolumeChanged {
+                                name,
+                                volume: Some(volume),
+                            },
+                            (events, players, property_streams, initial_events),
                         ));
                     }
                     None => return None,

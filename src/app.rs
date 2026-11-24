@@ -4,7 +4,6 @@ use crate::elements::{self, *};
 use crate::ipc::{SOCKET_MADE, get_sock_path};
 use crate::state::BarState;
 use crate::state::Message;
-use crate::state::PlayerState;
 use crate::theme::BackgroundContainer;
 use crate::tray::get_tray_host;
 use crate::{
@@ -20,7 +19,7 @@ use iced::Length;
 use iced::futures::StreamExt;
 use iced::{
     Element, Subscription, Task, alignment,
-    widget::{container, row, space::horizontal},
+    widget::{container, image::Handle, row, space::horizontal},
 };
 use iced_layershell::reexport::core::font;
 use iced_layershell::{reexport::Anchor, settings::LayerShellSettings};
@@ -285,57 +284,67 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
             .detach();
             Task::none()
         }
-        Message::PlayerAdded(player, metadata) => {
-            let name = player.name().to_string();
-            state.players.insert(
-                name.clone(),
-                PlayerState {
-                    player,
-                    metadata: None,
-                    image: None,
-                },
-            );
-            if metadata.is_some() {
-                Task::done(Message::MediaChanged(name, metadata))
-            } else {
-                Task::none()
-            }
+        Message::PlayerAdded(player) => {
+            let name = player.player.name().to_string();
+            state.players.insert(name, player.clone());
+            // Run the media-change path so the artwork is fetched exactly once.
+            Task::done(Message::MediaChanged(player))
         }
         Message::PlayerRemoved(name) => {
             state.players.remove(&name);
             Task::none()
         }
-        Message::MediaChanged(name, media) => {
+        Message::MediaChanged(mut player) => {
+            let name = player.player.name().to_string();
+            let url = player.metadata.as_ref().and_then(|m| m.art_url.clone());
+
+            // Metadata can be re-emitted for a track that already shows its
+            // artwork, and the bar rebuilds its view often. Keep the image we have
+            // in that case instead of downloading it again.
+            if let Some(existing) = state.players.get(&name)
+                && existing.image_url == url
+            {
+                player.image = existing.image.clone();
+                player.image_url = existing.image_url.clone();
+            }
+
+            let needs_image = player.image.is_none();
+            player.image_url = url.clone();
+            state.players.insert(name.clone(), player);
+
+            let Some(url) = url.filter(|_| needs_image) else {
+                return Task::none();
+            };
+            let image_url = url.clone();
+            Task::future(async move {
+                if let Some(file_path) = image_url.strip_prefix("file://") {
+                    smol::fs::read(file_path).await.ok()
+                } else {
+                    isahc::get_async(image_url).await.ok()?.bytes().await.ok()
+                }
+            })
+            .map(move |r| Message::NewImage(name.clone(), url.clone(), r))
+        }
+        Message::VolumeChanged(name, volume) => {
             let Some(player) = state.players.get_mut(&name) else {
                 return Task::none();
             };
-            let url = media.as_ref().and_then(|m| m.art_url.clone());
-            player.metadata = media;
-            player.image = None;
-
-            if let Some(url) = url {
-                let image_url = url.clone();
-                Task::future(async move {
-                    if let Some(file_path) = image_url.strip_prefix("file://") {
-                        smol::fs::read(file_path).await.ok()
-                    } else {
-                        isahc::get_async(image_url).await.ok()?.bytes().await.ok()
-                    }
-                })
-                .map(move |r| Message::NewImage(name.clone(), url.clone(), r))
-            } else {
-                Task::none()
-            }
+            let changed = player.volume != volume;
+            player.volume = volume;
+            // Write the new volume through to the player, but skip it when it is
+            // only an echo of a change we already applied.
+            let Some(volume) = volume.filter(|_| changed) else {
+                return Task::none();
+            };
+            let proxy = player.player.proxy.clone();
+            Task::future(async move { proxy.set_volume(volume as f64).await.ok() }).discard()
         }
         Message::NewImage(name, url, new) => {
+            // Drop the result if the track changed while the image was downloading.
             if let Some(player) = state.players.get_mut(&name)
-                && player
-                    .metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.art_url.as_deref())
-                    == Some(url.as_str())
+                && player.image_url.as_deref() == Some(url.as_str())
             {
-                player.image = new;
+                player.image = new.map(Handle::from_bytes);
             }
             Task::none()
         }

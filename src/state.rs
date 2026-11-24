@@ -7,7 +7,7 @@ use compositor_bridge::{
     CompositorEvent,
     state::{Window, Workspace, WorkspaceId},
 };
-use iced::{Animation, theme::Mode};
+use iced::{Animation, theme::Mode, widget::image::Handle};
 use iced_layershell::to_layer_message;
 use media::{MprisMetadata, Player};
 use tray_server::{ItemId, MenuNode, TrayEvent, TrayItem};
@@ -78,10 +78,16 @@ pub struct BatteryInfo {
     pub status: BatteryStatus,
 }
 
+#[derive(Debug, Clone)]
 pub struct PlayerState {
     pub player: Player,
     pub metadata: Option<MprisMetadata>,
-    pub image: Option<Vec<u8>>,
+    pub volume: Option<f32>,
+    /// Artwork handle. Keeping the handle (instead of the raw bytes) means
+    /// rebuilding the view reuses the renderer's texture instead of decoding again.
+    pub image: Option<Handle>,
+    /// URL the current `image` belongs to, used to avoid redundant downloads.
+    pub image_url: Option<String>,
 }
 
 impl Default for AppState {
@@ -139,9 +145,10 @@ pub enum Message {
     MouseLeave,
     Refresh,
     FocusWorkspace(WorkspaceId),
-    PlayerAdded(media::Player, Option<media::MprisMetadata>),
+    PlayerAdded(PlayerState),
     PlayerRemoved(String),
-    MediaChanged(String, Option<media::MprisMetadata>),
+    MediaChanged(PlayerState),
+    VolumeChanged(String, Option<f32>),
     NewImage(String, String, Option<Vec<u8>>),
     MediaControl(String, MediaControl),
 }
