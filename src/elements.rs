@@ -688,7 +688,7 @@ pub fn expanded_content(state: &AppState) -> Element<'_, Message> {
                                         )
                                     },
                                 ))
-                                .column_span(2),
+                                .column_span(3),
                             );
                         }
                         cells.extend(tray_buttons(state).map(GridCell::new));
