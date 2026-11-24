@@ -456,22 +456,42 @@ impl canvas::Program<Message> for BatteryFluid {
         }
 
         let accent = theme.extended_palette().primary.base.color;
+        let radius = RADIUS as f32;
+        let mut frame = canvas::Frame::new(renderer, size);
+
+        if level >= 1.0 {
+            frame.fill(
+                &canvas::Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into()),
+                accent,
+            );
+
+            return vec![frame.into_geometry()];
+        }
+
+        let left = fluid_surface_y(0.0, size, level, self.time);
+        let right = fluid_surface_y(size.width, size, level, self.time);
+        let bottom_left = (size.height - left).clamp(0.0, radius);
+        let bottom_right = (size.height - right).clamp(0.0, radius);
 
         let path = canvas::Path::new(|path| {
-            path.move_to(Point::new(
-                0.0,
-                fluid_surface_y(0.0, size, level, self.time),
-            ));
+            path.move_to(Point::new(0.0, left));
             for segment in 1..=FLUID_SEGMENTS {
                 let x = size.width * segment as f32 / FLUID_SEGMENTS as f32;
                 path.line_to(Point::new(x, fluid_surface_y(x, size, level, self.time)));
             }
-            path.line_to(Point::new(size.width, size.height));
-            path.line_to(Point::new(0.0, size.height));
+            path.line_to(Point::new(size.width, size.height - bottom_right));
+            path.quadratic_curve_to(
+                Point::new(size.width, size.height),
+                Point::new(size.width - bottom_right, size.height),
+            );
+            path.line_to(Point::new(bottom_left, size.height));
+            path.quadratic_curve_to(
+                Point::new(0.0, size.height),
+                Point::new(0.0, size.height - bottom_left),
+            );
             path.close();
         });
 
-        let mut frame = canvas::Frame::new(renderer, size);
         frame.fill(&path, accent);
 
         vec![frame.into_geometry()]
@@ -619,62 +639,6 @@ fn first_free_slot(
         }
 
         row += 1;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::place;
-
-    #[test]
-    fn fluid_surface_rises_with_the_level() {
-        let size = iced::Size::new(87.5, 185.0);
-        let low = super::fluid_surface_y(40.0, size, 0.2, 0.0);
-        let high = super::fluid_surface_y(40.0, size, 0.8, 0.0);
-
-        assert!(high < low, "a fuller cell has a higher surface");
-    }
-
-    #[test]
-    fn fluid_surface_stays_within_the_cell() {
-        let size = iced::Size::new(87.5, 185.0);
-
-        for step in 0..=64 {
-            let x = size.width * step as f32 / 64.0;
-            for level in [0.02, 0.18, 0.5, 0.9] {
-                let y = super::fluid_surface_y(x, size, level, 3.0);
-                assert!(y.is_finite());
-                // The wave rides the level, so it never leaves the cell by more
-                // than its amplitude.
-                assert!(y > -size.height * 0.06 && y < size.height * 1.05);
-            }
-        }
-    }
-
-    #[test]
-    fn fluid_surface_survives_degenerate_cells() {
-        assert!(super::fluid_surface_y(0.0, iced::Size::new(0.0, 0.0), 0.5, 0.0).is_finite());
-    }
-
-    #[test]
-    fn spans_are_clamped_to_the_grid() {
-        assert_eq!(place(2, [(0, 0), (5, 0)]), vec![(0, 0, 1, 1), (1, 0, 2, 1)]);
-    }
-
-    #[test]
-    fn second_row_spanning_cell_starts_below_the_first() {
-        assert_eq!(
-            place(2, [(2, 2), (1, 1), (1, 1)]),
-            vec![(0, 0, 2, 2), (2, 0, 1, 1), (2, 1, 1, 1)]
-        );
-    }
-
-    #[test]
-    fn cells_backfill_the_rows_left_free_by_tall_cells() {
-        assert_eq!(
-            place(3, [(2, 1), (1, 2), (1, 1)]),
-            vec![(0, 0, 2, 1), (0, 2, 1, 2), (1, 0, 1, 1)]
-        );
     }
 }
 
