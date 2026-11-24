@@ -3,6 +3,7 @@ use crate::consts::MARGINS;
 use crate::consts::MEDIA_IMAGE_SIZE;
 use crate::consts::MENU_WIDTH;
 use crate::consts::RADIUS;
+
 use crate::consts::WINDOW_HEIGHT;
 use crate::helper;
 use crate::theme::BackgroundContainer;
@@ -10,9 +11,9 @@ use crate::theme::Rounded;
 use crate::theme::button_style;
 use crate::theme::text_color;
 use crate::tray::get_tray_icon;
-use battery::units::ratio::percent;
 use chrono::Timelike;
 use iced::alignment;
+use iced::widget::canvas;
 use iced::widget::image;
 use iced::widget::image::Handle;
 use iced::widget::row;
@@ -20,11 +21,16 @@ use iced::widget::scrollable;
 use iced::widget::scrollable::Direction;
 use iced::widget::scrollable::Scrollbar;
 use iced::widget::{Button, Row, button, column, container, responsive, space::*, text};
-use iced::{ContentFit, Element, Length, Theme};
+use iced::{ContentFit, Element, Length, Point, Rectangle, Theme, mouse};
 use std::hash::Hash;
+use std::sync::LazyLock;
+use std::time::Instant;
 use tray_server::TrayItem;
 
-use crate::state::{AppState, Message};
+use crate::state::{AppState, BatteryInfo, BatteryStatus, Message};
+
+/// Start of the battery fluid animation, used to derive its phase.
+static FLUID_STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 pub fn window_text(state: &AppState) -> Element<'_, Message> {
     let window_text = if let Some(focused_window) = &state.focused_window {
@@ -107,7 +113,6 @@ pub fn workspaces(state: &AppState) -> Row<'_, Message> {
             }),
     )
     .align_y(iced::alignment::Vertical::Center)
-    .padding(iced::padding::horizontal(MARGINS).vertical(MARGINS / 2))
     .spacing(MARGINS)
 }
 
@@ -128,6 +133,7 @@ pub fn box_content<'a>(icon: &String, text: &String) -> Element<'a, Message> {
     .into()
 }
 
+#[allow(dead_code)]
 pub fn data_box<'a>(icon: &String, text: &String) -> Element<'a, Message> {
     container(box_content(icon, text))
         .padding(iced::padding::all(MARGINS))
@@ -344,18 +350,132 @@ pub fn tray_button<'a>(item: &'a TrayItem) -> Button<'a, Message> {
 }
 
 pub fn battery_indicators(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
-    let Ok(batteries) = state.battery.batteries() else {
-        return either::Left(std::iter::empty());
-    };
-    either::Right(batteries.flatten().map(|battery| {
-        data_box(
-            &"🔋".to_string(),
-            &format!(
-                "{:.0}%",
-                battery.state_of_charge().get::<percent>()
-            ),
+    let time = state
+        .now
+        .saturating_duration_since(*FLUID_STARTED)
+        .as_secs_f32();
+
+    state
+        .batteries
+        .iter()
+        .map(move |battery| battery_box(*battery, time))
+}
+
+pub fn battery_box<'a>(battery: BatteryInfo, time: f32) -> Element<'a, Message> {
+    let charging = battery.status == BatteryStatus::Charging;
+    let time = (time * if charging { 1.6 } else { 1.0 }) % FLUID_LOOP_LEN;
+
+    container(iced::widget::stack![
+        canvas(BatteryFluid {
+            level: battery.level,
+            time
+        })
+        .width(Length::Fill)
+        .height(Length::Fill),
+        container(
+            column![
+                text!(
+                    "{}",
+                    (if charging && battery.level != 1. {
+                        "⚡"
+                    } else {
+                        "🔋"
+                    })
+                )
+                .style(|theme: &Theme| {
+                    let mut style = text::primary(theme);
+                    style.color = Some(text_color(&theme.palette().primary));
+                    style
+                })
+                .center()
+                .width(Length::Fill)
+                .size(24),
+                vertical(),
+                text!("{:.0}%", battery.level * 100.0)
+                    .center()
+                    .width(Length::Fill)
+                    .style(|theme: &Theme| {
+                        let mut style = text::primary(theme);
+                        style.color = Some(text_color(&theme.palette().primary));
+                        style
+                    }),
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill),
         )
-    }))
+        .padding(iced::padding::all(MARGINS))
+        .width(Length::Fill)
+        .height(Length::Fill),
+    ])
+    .style(|theme: &Theme| {
+        let palette = theme.extended_palette();
+        container::primary(theme)
+            .rounded()
+            .background(palette.primary.weak.color)
+    })
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+const FLUID_LOOP_LEN: f32 = 32.0;
+const FLUID_SEGMENTS: usize = 64;
+
+/// Height of the fluid surface at `x`, for a cell of `size` filled to `level`.
+fn fluid_surface_y(x: f32, size: iced::Size, level: f32, time: f32) -> f32 {
+    let width = size.width.max(1.0);
+    let height = size.height.max(1.0);
+    let progress = x / width;
+
+    (1.0 - level) * height
+        + 0.019 * height * (progress * std::f32::consts::TAU * 1.25 + time * 0.3927).sin()
+        + 0.010 * height * (progress * std::f32::consts::TAU * 2.63 - time * 0.5890).sin()
+}
+
+struct BatteryFluid {
+    level: f32,
+    time: f32,
+}
+
+impl canvas::Program<Message> for BatteryFluid {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let size = bounds.size();
+        let level = self.level.clamp(0.0, 1.0);
+
+        if level <= 0.0 || size.width <= 0.0 || size.height <= 0.0 {
+            return Vec::new();
+        }
+
+        let accent = theme.extended_palette().primary.base.color;
+
+        let path = canvas::Path::new(|path| {
+            path.move_to(Point::new(
+                0.0,
+                fluid_surface_y(0.0, size, level, self.time),
+            ));
+            for segment in 1..=FLUID_SEGMENTS {
+                let x = size.width * segment as f32 / FLUID_SEGMENTS as f32;
+                path.line_to(Point::new(x, fluid_surface_y(x, size, level, self.time)));
+            }
+            path.line_to(Point::new(size.width, size.height));
+            path.line_to(Point::new(0.0, size.height));
+            path.close();
+        });
+
+        let mut frame = canvas::Frame::new(renderer, size);
+        frame.fill(&path, accent);
+
+        vec![frame.into_geometry()]
+    }
 }
 
 pub fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Message>> {
@@ -368,93 +488,271 @@ pub fn tray_buttons(state: &AppState) -> impl Iterator<Item = Element<'_, Messag
     })
 }
 
-fn grid_row<'a>(cells: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-    Row::with_children(cells)
-        .spacing(MARGINS)
+struct GridCell<'a> {
+    element: Element<'a, Message>,
+    column_span: usize,
+    row_span: usize,
+}
+
+impl<'a> GridCell<'a> {
+    fn new(element: impl Into<Element<'a, Message>>) -> Self {
+        Self {
+            element: element.into(),
+            column_span: 1,
+            row_span: 1,
+        }
+    }
+
+    fn column_span(mut self, span: usize) -> Self {
+        self.column_span = span;
+        self
+    }
+
+    fn row_span(mut self, span: usize) -> Self {
+        self.row_span = span;
+        self
+    }
+}
+
+/// Where a cell ended up on the grid: row, column, column span, row span.
+type Placement = (usize, usize, usize, usize);
+
+/// Packs the given `(column_span, row_span)` sizes into a `columns` wide grid in
+/// reading order, filling the first free slot that fits each one.
+fn place(columns: usize, spans: impl IntoIterator<Item = (usize, usize)>) -> Vec<Placement> {
+    let mut occupied: Vec<Vec<bool>> = Vec::new();
+    let mut placements = Vec::new();
+
+    for (column_span, row_span) in spans {
+        let column_span = column_span.clamp(1, columns);
+        let row_span = row_span.max(1);
+
+        let (row, column) = first_free_slot(&mut occupied, columns, column_span, row_span);
+        for occupied_row in &mut occupied[row..row + row_span] {
+            for occupied_cell in &mut occupied_row[column..column + column_span] {
+                *occupied_cell = true;
+            }
+        }
+
+        placements.push((row, column, column_span, row_span));
+    }
+
+    placements
+}
+
+/// Lays out `cells` on a `columns` wide grid of square `cell_size` cells,
+///
+/// Cells are packed in order into the first slot that fits their spans, so a
+/// cell can cover several rows and the following cells flow past it.
+fn grid<'a>(cells: Vec<GridCell<'a>>, cell_size: f32, columns: usize) -> Element<'a, Message> {
+    let cell_size = cell_size.max(0.0);
+    let gap = MARGINS as f32;
+    let columns = columns.max(1);
+
+    let placements = place(
+        columns,
+        cells.iter().map(|cell| (cell.column_span, cell.row_span)),
+    );
+
+    let rows = placements
+        .iter()
+        .map(|(row, _, _, row_span)| row + row_span)
+        .max()
+        .unwrap_or(0);
+    let height = cell_size * rows as f32 + gap * rows.saturating_sub(1) as f32;
+
+    let layers =
+        cells
+            .into_iter()
+            .zip(placements)
+            .map(|(cell, (row, column, column_span, row_span))| {
+                let width =
+                    cell_size * column_span as f32 + gap * column_span.saturating_sub(1) as f32;
+                let cell_height =
+                    cell_size * row_span as f32 + gap * row_span.saturating_sub(1) as f32;
+
+                // The grid is absolutely positioned so a cell can span several rows
+                // without the rows below it being pushed down. The outer container
+                // fills the grid and its padding is what offsets the cell.
+                container(container(cell.element).width(width).height(cell_height))
+                    .padding(iced::Padding {
+                        top: (row as f32) * (cell_size + gap),
+                        left: (column as f32) * (cell_size + gap),
+                        ..iced::Padding::ZERO
+                    })
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            });
+
+    iced::widget::stack(layers)
         .width(Length::Fill)
+        .height(height)
         .into()
 }
 
-pub fn expanded_content(state: &AppState) -> Element<'_, Message> {
+/// Finds the first slot, scanning row by row, where a `column_span` x `row_span`
+/// area is free, growing the occupancy map as needed.
+fn first_free_slot(
+    occupied: &mut Vec<Vec<bool>>,
+    columns: usize,
+    column_span: usize,
+    row_span: usize,
+) -> (usize, usize) {
+    let mut row = 0;
+
+    loop {
+        while occupied.len() < row + row_span {
+            occupied.push(vec![false; columns]);
+        }
+
+        let free_column = (0..=columns - column_span).find(|&column| {
+            occupied[row..row + row_span].iter().all(|occupied_row| {
+                occupied_row[column..column + column_span]
+                    .iter()
+                    .all(|occupied| !occupied)
+            })
+        });
+
+        if let Some(column) = free_column {
+            return (row, column);
+        }
+
+        row += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::place;
+
+    #[test]
+    fn fluid_surface_rises_with_the_level() {
+        let size = iced::Size::new(87.5, 185.0);
+        let low = super::fluid_surface_y(40.0, size, 0.2, 0.0);
+        let high = super::fluid_surface_y(40.0, size, 0.8, 0.0);
+
+        assert!(high < low, "a fuller cell has a higher surface");
+    }
+
+    #[test]
+    fn fluid_surface_stays_within_the_cell() {
+        let size = iced::Size::new(87.5, 185.0);
+
+        for step in 0..=64 {
+            let x = size.width * step as f32 / 64.0;
+            for level in [0.02, 0.18, 0.5, 0.9] {
+                let y = super::fluid_surface_y(x, size, level, 3.0);
+                assert!(y.is_finite());
+                // The wave rides the level, so it never leaves the cell by more
+                // than its amplitude.
+                assert!(y > -size.height * 0.06 && y < size.height * 1.05);
+            }
+        }
+    }
+
+    #[test]
+    fn fluid_surface_survives_degenerate_cells() {
+        assert!(super::fluid_surface_y(0.0, iced::Size::new(0.0, 0.0), 0.5, 0.0).is_finite());
+    }
+
+    #[test]
+    fn spans_are_clamped_to_the_grid() {
+        assert_eq!(place(2, [(0, 0), (5, 0)]), vec![(0, 0, 1, 1), (1, 0, 2, 1)]);
+    }
+
+    #[test]
+    fn second_row_spanning_cell_starts_below_the_first() {
+        assert_eq!(
+            place(2, [(2, 2), (1, 1), (1, 1)]),
+            vec![(0, 0, 2, 2), (2, 0, 1, 1), (2, 1, 1, 1)]
+        );
+    }
+
+    #[test]
+    fn cells_backfill_the_rows_left_free_by_tall_cells() {
+        assert_eq!(
+            place(3, [(2, 1), (1, 2), (1, 1)]),
+            vec![(0, 0, 2, 1), (0, 2, 1, 2), (1, 0, 1, 1)]
+        );
+    }
+}
+
+/// Horizontal gutter shared by every bar content layout so all states
+/// line up with each other regardless of their vertical padding.
+fn content_padding() -> iced::Padding {
+    iced::padding::horizontal(MARGINS)
+}
+
+fn top_bar<'a>(state: &'a AppState) -> Element<'a, Message> {
     let time = chrono::Local::now();
-    column![
-        column![
-            iced::widget::row![
-                window_text(state),
-                horizontal(),
-                Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
-            ],
-            vertical().height(MARGINS),
-            iced::widget::scrollable(
-                responsive(move |size| {
-                    let cell_width = ((size.width
-                        - MARGINS as f32 * COLUMNS.saturating_sub(1) as f32)
-                        / COLUMNS as f32)
-                        .max(0.0);
-                    let mut cells = Vec::new();
-
-                    cells.extend(battery_indicators(state).map(|element| (element, 1)));
-                    for (name, player) in &state.players {
-                        let dependency = (name, &player.metadata, &player.image);
-                        cells.push((
-                            Element::from(iced::widget::lazy(
-                                dependency,
-                                |(name, metadata, image)| {
-                                    media_box(name.as_str(), (*metadata).as_ref(), (*image).clone())
-                                },
-                            )),
-                            2,
-                        ));
-                    }
-                    cells.extend(tray_buttons(state).map(|element| (element, 1)));
-
-                    let mut rows = Vec::new();
-                    let mut row_cells = Vec::new();
-                    let mut used_columns = 0;
-
-                    for (element, span) in cells {
-                        if used_columns > 0 && used_columns + span > COLUMNS {
-                            rows.push(grid_row(std::mem::take(&mut row_cells)));
-                            used_columns = 0;
-                        }
-
-                        let width = cell_width * span as f32
-                            + MARGINS as f32 * span.saturating_sub(1) as f32;
-                        row_cells.push(container(element).width(width).height(cell_width).into());
-                        used_columns += span;
-
-                        if used_columns == COLUMNS {
-                            rows.push(grid_row(std::mem::take(&mut row_cells)));
-                            used_columns = 0;
-                        }
-                    }
-
-                    if !row_cells.is_empty() {
-                        rows.push(grid_row(row_cells));
-                    }
-
-                    column(rows).spacing(MARGINS).width(Length::Fill).into()
-                })
-                .height(Length::Shrink)
-            )
-            .height(Length::Fill)
-        ]
-        .padding(iced::padding::horizontal(MARGINS)),
-        container(workspaces(state))
+    iced::widget::row![
+        window_text(state),
+        horizontal(),
+        Element::from(text!("{:02}:{:02}", time.hour(), time.minute()))
     ]
-    .spacing(MARGINS)
+    .into()
+}
+
+pub fn expanded_content(state: &AppState) -> Element<'_, Message> {
+    container(
+        column![
+            column![
+                top_bar(state),
+                vertical().height(MARGINS),
+                iced::widget::scrollable(
+                    responsive(move |size| {
+                        let cell_width = ((size.width
+                            - MARGINS as f32 * COLUMNS.saturating_sub(1) as f32)
+                            / COLUMNS as f32)
+                            .max(0.0);
+                        let mut cells = Vec::new();
+
+                        cells.extend(
+                            battery_indicators(state)
+                                .map(|element| GridCell::new(element).row_span(2)),
+                        );
+                        for (name, player) in &state.players {
+                            let dependency = (name, &player.metadata, &player.image);
+                            cells.push(
+                                GridCell::new(iced::widget::lazy(
+                                    dependency,
+                                    |(name, metadata, image)| {
+                                        media_box(
+                                            name.as_str(),
+                                            (*metadata).as_ref(),
+                                            (*image).clone(),
+                                        )
+                                    },
+                                ))
+                                .column_span(2),
+                            );
+                        }
+                        cells.extend(tray_buttons(state).map(GridCell::new));
+
+                        grid(cells, cell_width, COLUMNS)
+                    })
+                    .height(Length::Shrink),
+                )
+                .height(Length::Fill),
+            ],
+            container(workspaces(state)),
+        ]
+        .spacing(MARGINS)
+        .width(Length::Fill)
+        .height(Length::Fill),
+    )
+    .padding(content_padding())
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
 }
 
 pub fn peek_content(state: &AppState) -> Element<'_, Message> {
-    let content = column![
-        container(window_text(state)).padding(iced::padding::horizontal(MARGINS)),
-        workspaces(state),
-    ]
-    .width(Length::Fill)
-    .height(Length::Fill);
+    let content = container(column![top_bar(state), workspaces(state)].spacing(MARGINS))
+        .padding(content_padding().vertical(MARGINS / 2))
+        .width(Length::Fill)
+        .height(Length::Fill);
     iced::widget::mouse_area(content)
         .on_enter(Message::UnCollapse)
         .into()
@@ -468,7 +766,8 @@ pub fn collapsed_content(state: &AppState) -> Element<'_, Message> {
     iced::widget::stack![
         activator,
         container(column![vertical(), workspaces(state)])
-            .style(|theme| container::primary(theme).background_container(theme)),
+            .style(|theme| container::primary(theme).background_container(theme))
+            .padding(content_padding().vertical(MARGINS / 2))
     ]
     .width(Length::Fill)
     .height(Length::Fill)

@@ -54,12 +54,28 @@ pub struct AppState {
     pub menu_id: Option<ItemId>,
     pub now: std::time::Instant,
     pub mode: Option<Mode>,
-    pub battery: battery::Manager,
+    pub batteries: Vec<BatteryInfo>,
     pub tray_icons: HashMap<ItemId, TrayItem>,
     pub resize_pending: bool,
     pub peek_generation: u64,
     pub persistent_peek: bool,
     pub players: BTreeMap<String, PlayerState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatteryStatus {
+    Unknown,
+    Charging,
+    Discharging,
+    Empty,
+    Full,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BatteryInfo {
+    /// Charge level, from `0.0` to `1.0`.
+    pub level: f32,
+    pub status: BatteryStatus,
 }
 
 pub struct PlayerState {
@@ -85,7 +101,7 @@ impl Default for AppState {
             menu_id: None,
             now: std::time::Instant::now(),
             mode: None,
-            battery: battery::Manager::new().unwrap(),
+            batteries: vec![],
             resize_pending: false,
             peek_generation: 0,
             persistent_peek: false,
@@ -114,6 +130,7 @@ pub enum Message {
     CloseTray,
     ToggleCollapse,
     AnimationUpdate,
+    Batteries(Vec<BatteryInfo>),
     UnCollapse,
     Collapse,
     Peek,

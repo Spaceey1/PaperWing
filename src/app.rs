@@ -192,6 +192,10 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 Task::none()
             }
         }
+        Message::Batteries(batteries) => {
+            state.batteries = batteries;
+            Task::none()
+        }
         Message::AnimationUpdate => {
             state.now = std::time::Instant::now();
             if !state.bar_state.is_animating(state.now) && state.resize_pending {
@@ -394,6 +398,7 @@ pub fn start_app() {
             .subscription(|state| {
                 Subscription::batch([
                     clock_subscription(),
+                    battery_subscription(),
                     ipc_subscription(),
                     tray_subscription(),
                     window_hover_subscription(),

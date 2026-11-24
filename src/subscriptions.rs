@@ -1,7 +1,11 @@
 use crate::ipc;
 use crate::state::AppState;
+use crate::state::BarState;
+use crate::state::BatteryInfo;
+use crate::state::BatteryStatus;
 use crate::state::Message;
 use crate::tray::tray_listener;
+use battery::units::ratio::percent;
 use chrono::Timelike;
 use compositor_bridge::CompositorEvent;
 use iced::futures::StreamExt;
@@ -59,11 +63,55 @@ pub fn ipc_subscription() -> Subscription<Message> {
 }
 
 pub fn animation_subscription(state: &AppState) -> Subscription<Message> {
-    if state.bar_state.is_animating(state.now) || state.menu_open.is_animating(state.now) {
+    let battery_fluid_animating =
+        state.bar_state.value() == BarState::Expanded && !state.batteries.is_empty();
+
+    if state.bar_state.is_animating(state.now)
+        || state.menu_open.is_animating(state.now)
+        || battery_fluid_animating
+    {
         iced::window::frames().map(|_| Message::AnimationUpdate)
     } else {
         Subscription::none()
     }
+}
+
+/// Polls the battery so the view can read it every frame without talking to
+/// upower every frame.
+pub fn battery_subscription() -> Subscription<Message> {
+    Subscription::run(|| {
+        iced::stream::channel(10, |mut output: mpsc::Sender<Message>| async move {
+            loop {
+                send_message(&mut output, Message::Batteries(poll_batteries())).await;
+                smol::Timer::after(std::time::Duration::from_secs(10)).await;
+            }
+        })
+    })
+}
+
+/// The manager is not `Send`, so it is built and dropped inside this call
+/// instead of being held across an `await`.
+fn poll_batteries() -> Vec<BatteryInfo> {
+    let Ok(manager) = battery::Manager::new() else {
+        return Vec::new();
+    };
+    let Ok(batteries) = manager.batteries() else {
+        return Vec::new();
+    };
+
+    batteries
+        .flatten()
+        .map(|battery| BatteryInfo {
+            level: battery.state_of_charge().get::<percent>() / 100.0,
+            status: match battery.state() {
+                battery::State::Charging => BatteryStatus::Charging,
+                battery::State::Discharging => BatteryStatus::Discharging,
+                battery::State::Empty => BatteryStatus::Empty,
+                battery::State::Full => BatteryStatus::Full,
+                _ => BatteryStatus::Unknown,
+            },
+        })
+        .collect()
 }
 
 pub fn tray_subscription() -> Subscription<Message> {
